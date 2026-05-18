@@ -42,10 +42,12 @@ import reference_core as rc
 
 def load_mnist_test_labels(cache_dir: str) -> np.ndarray:
     """
-    torchvision으로 MNIST 테스트셋 라벨 10K개 로드.
+    torchvision으로 MNIST 라벨 10K개 로드.
 
-    과제 input.npy의 이미지가 MNIST test split과 동일 순서라고 가정.
-    (명세상 10K = MNIST test set 크기와 일치)
+    최초에는 test split을 썼으나, input.npy의 첫 5장이 (5,0,4,1,9)로
+    MNIST **train split** 첫 5장과 일치함을 시각 검증으로 확인.
+    조교 배포 데이터는 train split의 앞 10000장으로 추정.
+    → train=True의 앞 10000개 라벨을 사용.
 
     Returns
     -------
@@ -60,11 +62,11 @@ def load_mnist_test_labels(cache_dir: str) -> np.ndarray:
         ) from e
 
     os.makedirs(cache_dir, exist_ok=True)
-    # train=False → test split (10K). download=True → 이미 있으면 skip.
-    ds = MNIST(root=cache_dir, train=False, download=True)
-    # ds.targets은 torch.Tensor; numpy로
-    labels = ds.targets.numpy().astype(np.int64)
-    assert labels.shape == (10000,), f"unexpected MNIST test shape: {labels.shape}"
+    # train=True → train split (60K). 앞 10000장만 사용 (input.npy와 매칭).
+    ds = MNIST(root=cache_dir, train=True, download=True)
+    labels_full = ds.targets.numpy().astype(np.int64)
+    assert labels_full.shape == (60000,), f"unexpected MNIST train shape: {labels_full.shape}"
+    labels = labels_full[:10000]
     return labels
 
 

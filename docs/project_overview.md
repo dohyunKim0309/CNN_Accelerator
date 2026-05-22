@@ -309,12 +309,12 @@ Testbench (각 모듈당 1개)
 
 ## 11. 역할 분배
 
-| 담당자     | 작업                                                              |
-| ------- | --------------------------------------------------------------- |
-| **김도현** | PE, conv2_engine.v, header file, hex file, CSR_AXI              |
-| **김동주** | PE, conv1_engine.v                                              |
-| **신지민** | ping_pong_buffer.v, maxpool_engine.v, fc_engine.v, armax_unit.v |
-| **공통**  | Block Design, cnn_accel_top.v                                   |
+| 담당자     | 작업                                                                        |
+| ------- |---------------------------------------------------------------------------|
+| **김도현** | PE, conv2_engine.v, header file, CSR_AXI                                  |
+| **김동주** | PE, conv1_engine.v                                                        |
+| **신지민** | ping_pong_buffer.v, maxpool_engine.v, fc_engine.v, armax_unit.v, hex file |
+| **공통**  | Block Design, cnn_accel_top.v                                             |
 
 ---
 

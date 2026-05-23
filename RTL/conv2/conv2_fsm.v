@@ -46,7 +46,8 @@ module conv2_fsm (
     output reg  [1:0]  col_sel,          // window col selector (0, 1, 2)
                                          // PE에 전달할 window의 col 위치
     output reg         shift_en,         // line_buffer + window shift
-    output reg         read_en,          // c1c2 BRAM read enable
+                                         // c1c2 BRAM enable에도 연결
+                                         // (BRAM 2-cycle latency는 외부에서 자동 흡수)
     output reg         pe_en              // PE clock enable
 );
 
@@ -248,7 +249,7 @@ module conv2_fsm (
     end
 
     // read_row, read_col: 다음 read할 BRAM 좌표
-    //   read_en이 1인 cycle에 증가
+    //   shift_en이 1인 cycle에 증가 (BRAM read와 line_buffer shift 동시)
     //   col 25 도달 후 row 증가
     always @(posedge clk) begin
         if (rst) begin
@@ -258,7 +259,7 @@ module conv2_fsm (
             // 새 이미지 시작: 카운터 초기화
             read_row <= 5'd0;
             read_col <= 5'd0;
-        end else if (read_en) begin
+        end else if (shift_en) begin
             if (read_col == 5'd25) begin
                 read_col <= 5'd0;
                 read_row <= read_row + 5'd1;
@@ -271,21 +272,23 @@ module conv2_fsm (
     //==========================================================================
     // 7. 제어 신호 출력 (combinational)
     //
-    //   상태별 신호 패턴 (문서 5.2 참조):
-    //                    sel       col_sel    shift_en  read_en   pe_en
-    //   IDLE              0         0          0         0         0
-    //   PIPELINE_FILL     0         0          1         1         0
-    //   COMPUTE_HOLD      0/1       0/1        0         0         1
-    //   COMPUTE_ADVANCE   2         2          1         1         1
-    //   COMPUTE_WRAP      0/1/2     0          1         1         1
-    //   DONE              0         0          0         0         0
+    //   상태별 신호 패턴:
+    //                    sel       col_sel    shift_en  pe_en
+    //   IDLE              0         0          0         0
+    //   PIPELINE_FILL     0         0          1         0
+    //   COMPUTE_HOLD      0/1       0/1        0         1
+    //   COMPUTE_ADVANCE   2         2          1         1
+    //   COMPUTE_WRAP      0/1/2     0          1         1
+    //   DONE              0         0          0         0
+    //
+    //   shift_en은 외부에서 c1c2 BRAM enable에 연결
+    //   (BRAM 2-cycle latency는 PIPELINE_FILL 시간에 자연 흡수)
     //==========================================================================
     always @(*) begin
         // Default values
         sel      = 2'd0;
         col_sel  = 2'd0;
         shift_en = 1'b0;
-        read_en  = 1'b0;
         pe_en    = 1'b0;
 
         case (state)
@@ -295,7 +298,6 @@ module conv2_fsm (
 
             PIPELINE_FILL: begin
                 shift_en = 1'b1;
-                read_en  = 1'b1;
                 // pe_en = 0 (compute 아직 안 함)
             end
 
@@ -303,7 +305,6 @@ module conv2_fsm (
                 sel      = kcol_phase;   // 0 또는 1
                 col_sel  = kcol_phase;   // 0 또는 1 (col_sel = sel in HOLD)
                 shift_en = 1'b0;
-                read_en  = 1'b0;
                 pe_en    = 1'b1;
             end
 
@@ -311,7 +312,6 @@ module conv2_fsm (
                 sel      = 2'd2;
                 col_sel  = 2'd2;
                 shift_en = 1'b1;
-                read_en  = 1'b1;
                 pe_en    = 1'b1;
             end
 
@@ -319,7 +319,6 @@ module conv2_fsm (
                 sel      = wrap_cnt;     // 0 → 1 → 2
                 col_sel  = 2'd0;         // 고정 0 (WRAP의 핵심)
                 shift_en = 1'b1;
-                read_en  = 1'b1;
                 pe_en    = 1'b1;
             end
 

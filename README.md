@@ -60,8 +60,9 @@ Output Logit (10) → argmax
 
 `RTL/` 에서 본격적으로 시작. 명세 그대로의 INT8 Direct Convolution 으로 전체 파이프라인 구현. 1만 장 처리 latency 의 기준선(baseline) 을 확보하는 단계.
 
-- Output Stationary 데이터플로우 채택
-- Conv2 기준 `oc_par × ic_par × K = 8 × 8 × 3 × 3 = 192 DSP` 사용
+- Output Stationary + Weight Stationary 데이터플로우 채택
+- Conv1 기준 `oc_par × ic_par × KH × KW = 2 × 2 × 3 × 3 = 18 DSP` 사용
+- Conv2 기준 `oc_par × ic_par × KH = 8 × 16 × 3 = 192 DSP` 사용
 - 채널별 line buffer + window register 로 streaming 처리
 
 ### Phase 2 — Winograd Conv2 가속 (예정)

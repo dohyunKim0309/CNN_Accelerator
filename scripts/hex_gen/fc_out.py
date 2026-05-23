@@ -1,12 +1,13 @@
 import numpy as np
 
 # -------------------------------------------------------
-# 파일 경로 설정 (npy 파일과 같은 디렉토리, 또는 직접 수정)
+# 파일 경로 설정 (프로젝트 루트에서 실행한다고 가정)
 # -------------------------------------------------------
-INPUT_FILE   = "input.npy"
-WEIGHT1_FILE = "layer1_0_weight.npy"
-WEIGHT2_FILE = "layer2_0_weight.npy"
-OUTPUT_HEX   = "conv2_output_processed.hex"
+INPUT_FILE   = "../../data/npy/input.npy"
+WEIGHT1_FILE = "../../data/npy/layer1_0_weight.npy"
+WEIGHT2_FILE = "../../data/npy/layer2_0_weight.npy"
+FC1_FILE     = "../../data/npy/fc1_weight.npy"
+OUTPUT_HEX   = "../../data/hex_layer_by_layer/fc_output.hex"
 
 # -------------------------------------------------------
 # 파일 로드
@@ -14,10 +15,12 @@ OUTPUT_HEX   = "conv2_output_processed.hex"
 inp     = np.load(INPUT_FILE)    # (N, 1, 28, 28), int8
 weight1 = np.load(WEIGHT1_FILE)  # (8, 1, 3, 3),   int8
 weight2 = np.load(WEIGHT2_FILE)  # (16, 8, 3, 3),  int8
+fc1_w   = np.load(FC1_FILE)      # (10, 2304),      int8
 
 print(f"[Load] input shape   : {inp.shape},       dtype={inp.dtype}")
 print(f"[Load] weight1 shape : {weight1.shape},   dtype={weight1.dtype}")
-print(f"[Load] weight2 shape : {weight2.shape}, dtype={weight2.dtype}")
+print(f"[Load] weight2 shape : {weight2.shape},   dtype={weight2.dtype}")
+print(f"[Load] fc1_w   shape : {fc1_w.shape},     dtype={fc1_w.dtype}")
 
 # -------------------------------------------------------
 # 첫 번째 이미지 선택
@@ -91,10 +94,54 @@ relu2 = np.maximum(saturated2.astype(np.int32), 0).astype(np.int8)
 print(f"[ReLU]        min={relu2.min()}  max={relu2.max()}")
 
 # -------------------------------------------------------
-# 결과 hex 파일 출력 (1바이트씩, 2자리 hex)
+# ========== MaxPool2D (2x2, stride=2) ==========
+# -------------------------------------------------------
+pC, pH, pW = relu2.shape       # (16, 24, 24)
+pH_out = pH // 2               # 12
+pW_out = pW // 2               # 12
+
+pooled = np.zeros((pC, pH_out, pW_out), dtype=np.int8)
+for c in range(pC):
+    for i in range(pH_out):
+        for j in range(pW_out):
+            patch = relu2[c, i*2:i*2+2, j*2:j*2+2].astype(np.int32)
+            pooled[c, i, j] = np.max(patch)
+
+print(f"\n[MaxPool2D]   shape={pooled.shape}  min={pooled.min()}  max={pooled.max()}")
+
+# -------------------------------------------------------
+# ========== Flatten ==========
+# -------------------------------------------------------
+flat = pooled.flatten().astype(np.int32)   # (2304,)
+print(f"\n[Flatten]     shape={flat.shape}  min={flat.min()}  max={flat.max()}")
+
+# -------------------------------------------------------
+# ========== FC1 (Linear: 2304 → 10) ==========
+# -------------------------------------------------------
+# fc1_w: (10, 2304) int8
+fc1_out = fc1_w.astype(np.int32) @ flat   # (10,), int32
+print(f"\n[FC1 raw]     shape={fc1_out.shape}  min={fc1_out.min()}  max={fc1_out.max()}")
+
+# Step: >> 10
+fc1_shifted = fc1_out >> 10
+print(f"[>> 10]       min={fc1_shifted.min()}  max={fc1_shifted.max()}")
+
+# Step: Saturation → int8
+fc1_sat = np.clip(fc1_shifted, -128, 127).astype(np.int8)
+print(f"[Saturation]  min={fc1_sat.min()}  max={fc1_sat.max()}")
+
+# -------------------------------------------------------
+# 예측 클래스 출력
+# -------------------------------------------------------
+pred_class = int(np.argmax(fc1_sat))
+print(f"\n[Result] predicted class = {pred_class}")
+print(f"[Result] fc1_sat values  = {fc1_sat}")
+
+# -------------------------------------------------------
+# 결과 hex 파일 출력 (1바이트씩, 2자리 hex, unsigned 표현)
 # -------------------------------------------------------
 with open(OUTPUT_HEX, "w") as f:
-    for b in relu2.flatten().tobytes():
+    for b in fc1_sat.flatten().tobytes():
         f.write(f"{b:02X}\n")
 
-print(f"\n출력 완료 → {OUTPUT_HEX}  ({relu2.size} entries, shape={relu2.shape})")
+print(f"\n출력 완료 → {OUTPUT_HEX}  ({fc1_sat.size} entries, shape={fc1_sat.shape})")

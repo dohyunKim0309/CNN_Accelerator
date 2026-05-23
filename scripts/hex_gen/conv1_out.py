@@ -2,11 +2,11 @@ import numpy as np
 import os
 
 # -------------------------------------------------------
-# 파일 경로 설정 (npy 파일과 같은 디렉토리, 또는 직접 수정)
+# 파일 경로 설정 (프로젝트 루트에서 실행한다고 가정)
 # -------------------------------------------------------
-INPUT_FILE  = "input.npy"
-WEIGHT_FILE = "layer1_0_weight.npy"
-OUTPUT_HEX  = "conv1_output_processed.hex"
+INPUT_FILE  = "../../data/npy/input.npy"
+WEIGHT_FILE = "../../data/npy/layer1_0_weight.npy"
+OUTPUT_HEX  = "../../data/hex_layer_by_layer/conv1_output_processed.hex"
 
 # -------------------------------------------------------
 # 파일 로드

@@ -54,7 +54,7 @@ Output Logit (10) → argmax
 
 ### Phase 0 — Sobel Baseline (완료)
 
-`AS1_Sobel_Baseline/` 에 위치. 102×102 grayscale 이미지에 대한 3×3 Sobel edge detection IP. CNN 가속기를 위한 기본 인프라(Line buffer + 3×3 window register, AXI CSR 슬레이브, BRAM Port A/B 분리, PS-PL 데이터 전송 프로토콜) 를 검증하는 단계.
+`AS1_Sobel_Baseline/` 에 위치.정 102×102 grayscale 이미지에 대한 3×3 Sobel edge detection IP. CNN 가속기를 위한 기본 인프라(Line buffer + 3×3 window register, AXI CSR 슬레이브, BRAM Port A/B 분리, PS-PL 데이터 전송 프로토콜) 를 검증하는 단계.
 
 ### Phase 1 — INT8 Direct CNN Accelerator (진행 중)
 

@@ -176,7 +176,7 @@ module conv1_engine (
             pe_cell pe (
                 .clk          (clk),
                 .rst          (rst),
-                .packed_a     (pe_packed_a),
+                .packed_w     (pe_packed_a),
                 .weight_load1 (pe_weight_load1[gi]),
                 .weight_load2 (pe_weight_load2[gi]),
                 .sel          (sel),
@@ -192,7 +192,7 @@ module conv1_engine (
             pe_cell pe (
                 .clk          (clk),
                 .rst          (rst),
-                .packed_a     (pe_packed_a),
+                .packed_w     (pe_packed_a),
                 .weight_load1 (pe_weight_load1[gi+9]),
                 .weight_load2 (pe_weight_load2[gi+9]),
                 .sel          (sel),

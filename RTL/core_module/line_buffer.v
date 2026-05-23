@@ -10,7 +10,9 @@
 
 module line_buffer #(
     parameter integer WIDTH = 8,
-    parameter integer DEPTH = 27    // Conv1: 28-1=27 (1행 지연)
+    // Conv1: 28-1=27 (1행 추가 지연)
+    // Conv2: 26-1=25 (1행 추가 지연)
+    parameter integer DEPTH = 27
 )(
     input  wire             clk,
     input  wire             en,
@@ -19,8 +21,8 @@ module line_buffer #(
 );
     localparam integer ADDR_W = $clog2(DEPTH);
 
-    // BRAM 추론 (Sobel과 동일)
-    (* ram_style = "block" *) reg [WIDTH-1:0] mem [0:DEPTH-1];
+    // BRAM 추론 부분 삭제 - 어차피 LUTRAM 합성되어도 문제 없음
+    reg [WIDTH-1:0] mem [0:DEPTH-1];
 
     reg [ADDR_W-1:0] ptr = {ADDR_W{1'b0}};
 

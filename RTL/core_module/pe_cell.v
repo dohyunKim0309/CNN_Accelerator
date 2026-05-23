@@ -23,19 +23,19 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module pe_cell #(
-    parameter N_WEIGHTS = 2,
-    parameter SEL_WIDTH = (N_WEIGHTS > 1) ? $clog2(N_WEIGHTS) : 1
+    parameter DEPTH = 2,
+    parameter ADDR_W = (DEPTH > 1) ? $clog2(DEPTH) : 1
 )(
     input  wire        clk,
     input  wire        rst,            // active-high, cnn_accel_top에서 변환
 
     // weight 적재
     input  wire [24:0]          packed_w,   // weight_loader에서 공급
-    input  wire [SEL_WIDTH-1:0] load_idx,   // parameterized weight index
+    input  wire [ADDR_W-1:0] load_idx,   // parameterized weight index
     input  wire                 load_en,    // load enable, active-high
 
     // 라운드 선택, Selection(each cycle)
-    input  wire [SEL_WIDTH-1:0] sel,
+    input  wire [ADDR_W-1:0] sel,
 
     // Pipeline
     input  wire              en,       // active-high
@@ -47,14 +47,14 @@ module pe_cell #(
 );
 
     //==========================================================================
-    // 1. Weight Registered (Parametrized)
+    // 1. Weight Registers (Parametrized)
     //==========================================================================
-    reg [24:0] w_regs [0:N_WEIGHTS-1];
+    reg [24:0] w_regs [0:DEPTH-1];
 
     integer i;
     always @(posedge clk) begin
         if(rst) begin
-            for (i=0; i<N_WEIGHTS; i=i+1) begin
+            for (i=0; i<DEPTH; i=i+1) begin
                 w_regs[i] <= 25'd0;
             end
         end else if (load_en) begin
@@ -67,7 +67,7 @@ module pe_cell #(
     //==========================================================================
     wire [24:0] active_reg;
     generate
-        if (N_WEIGHTS == 1) begin
+        if (DEPTH == 1) begin
             assign active_reg = w_regs[0];
         end else begin
             assign active_reg = w_regs[sel];

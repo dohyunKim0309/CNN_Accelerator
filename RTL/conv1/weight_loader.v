@@ -31,7 +31,7 @@ module weight_loader #(
     // BRAM 인터페이스
     output reg  [ADDR_W-1:0] bram_addr,
     output reg               bram_en,
-    input  wire [24:0]       bram_dout,
+    input  wire [31:0]       bram_dout, // Axi burst 맞추기 위해 32비트 설정
 
     // pe_cell 18개 제어
     output reg  [24:0]       pe_packed_a,
@@ -87,7 +87,7 @@ module weight_loader #(
             // BRAM 레이턴시 1사이클 → 래치
             // req_cnt=1일 때 addr=0 결과 유효 → latch_cnt=0에 저장
             if (latch_valid) begin
-                pe_packed_a <= bram_dout;
+                pe_packed_a <= bram_dout[24:0];  // Axi burst 구현때문에 32비트로 늘렸기에 MSB 7비트 버림
 
                 // latch_cnt 기준으로 어떤 pe_cell의 어떤 reg에 쓸지 결정
                 if (latch_cnt <= 6'd8) begin

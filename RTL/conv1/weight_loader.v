@@ -33,7 +33,7 @@ module weight_loader #(
     output reg               bram_en,
     input  wire [31:0]       bram_dout, // Axi burst 맞추기 위해 32비트 설정
 
-    // pe_cell 18개 제어
+    // pe_cell 18개 제어g
     output reg  [24:0]       pe_packed_a,
     output reg  [NUM_PE-1:0] pe_weight_load1,
     output reg  [NUM_PE-1:0] pe_weight_load2

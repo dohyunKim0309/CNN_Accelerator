@@ -1,12 +1,13 @@
 import numpy as np
 
 # -------------------------------------------------------
-# 파일 경로 설정 (프로젝트 루트에서 실행한다고 가정)
+# 파일 경로 설정 (스크립트 디렉터리에서 실행한다고 가정)
 # -------------------------------------------------------
-INPUT_FILE   = "../../data/npy/input.npy"
-WEIGHT1_FILE = "../../data/npy/layer1_0_weight.npy"
-WEIGHT2_FILE = "../../data/npy/layer2_0_weight.npy"
-OUTPUT_HEX   = "../../data/hex_layer_by_layer/conv2_output_processed.hex"
+INPUT_FILE       = "../../data/npy/input.npy"
+WEIGHT1_FILE     = "../../data/npy/layer1_0_weight.npy"
+WEIGHT2_FILE     = "../../data/npy/layer2_0_weight.npy"
+OUTPUT_HEX_BYTE  = "../../data/hex_layer_by_layer/conv2_output_processed.hex"   # 기존: 1 byte/line
+OUTPUT_HEX_BRAM  = "../../data/hex_layer_by_layer/conv2_output_c2pool.hex"      # 신규: c2pool BRAM expected format
 
 # -------------------------------------------------------
 # 파일 로드
@@ -91,10 +92,32 @@ relu2 = np.maximum(saturated2.astype(np.int32), 0).astype(np.int8)
 print(f"[ReLU]        min={relu2.min()}  max={relu2.max()}")
 
 # -------------------------------------------------------
-# 결과 hex 파일 출력 (1바이트씩, 2자리 hex)
+# Output 1: 기존 byte-level hex (1 byte/line, oc-major flatten)
+#   - 인간 inspection 용
+#   - 순서: oc=0 (h-w raster) → oc=1 → ... → oc=15
 # -------------------------------------------------------
-with open(OUTPUT_HEX, "w") as f:
+with open(OUTPUT_HEX_BYTE, "w") as f:
     for b in relu2.flatten().tobytes():
         f.write(f"{b:02X}\n")
+print(f"\n[Write] {OUTPUT_HEX_BYTE}  ({relu2.size} lines, 1 byte/line)")
 
-print(f"\n출력 완료 → {OUTPUT_HEX}  ({relu2.size} entries, shape={relu2.shape})")
+# -------------------------------------------------------
+# Output 2: c2pool BRAM expected format (128-bit/line, write_addr 순서)
+#   - conv2_engine 의 c2pool BRAM Port A write 결과 비교용
+#   - Width 128-bit = 16 OC × 8b packed; OC 0 = LSB (lowest 8 bits)
+#   - write_addr 카운터는 c2pool_we pulse 마다 +1, 0..575 raster (h*24 + w)
+#   - 본 file 은 576 lines (valid output 만). testbench 가 c2pool_mem[0..575] 와 비교.
+#
+#   Mapping:
+#     - line[N] for N ∈ 0..575: N = h*24 + w, packed 16 OC bytes
+# -------------------------------------------------------
+with open(OUTPUT_HEX_BRAM, "w") as f:
+    for N in range(576):
+        h = N // 24
+        w = N % 24
+        word = 0
+        for oc in range(16):
+            byte = int(relu2[oc, h, w]) & 0xFF
+            word |= (byte << (oc * 8))
+        f.write(f"{word:032X}\n")
+print(f"[Write] {OUTPUT_HEX_BRAM}  (576 lines, 128-bit/line, c2pool write_addr 순)")

@@ -121,7 +121,7 @@ in_bram_dout (8-bit)
 ### 5-3. 가중치 로딩 경로
 
 ```
-weight BRAM (32-bit × 36 addr)
+weight BRAM (32-bit × 36 addr)  (18개 PE  ×  2라운드(w_regs[0], w_regs[1])  =  36개 addr)
     │  (addr 0~35, 2사이클 BRAM 레이턴시)
     ▼
 conv1_weight_loader
@@ -183,17 +183,49 @@ IDLE ──(start)──→ LOAD ──(load_done)──→ RUN1
                                                                                     FLUSH2 ──(6사이클)──→ DONE ──→ IDLE
 ```
 
-| 상태 | pipe_en | sel | lb_rst | 설명 |
-|------|---------|-----|--------|------|
-| IDLE | 0 | 0 | 0 | start 대기 |
-| LOAD | 0 | 0 | 0 | 가중치 적재 완료 대기 |
-| RUN1 | 1 | 0 | 0 | 28×28 스캔, oc0~3 계산 |
-| FLUSH1 | 1 | 0 | 0 | 마지막 픽셀 파이프라인 드레인 (6사이클) |
-| LBRST | 0 | 1 | 1 | line_buffer/window_register 클리어 (1사이클) |
-| RUN2 | 1 | 1 | 0 | 28×28 재스캔, oc4~7 계산 |
-| FLUSH2 | 1 | 1 | 0 | 마지막 픽셀 파이프라인 드레인 (6사이클) |
-| DONE | 0 | - | 0 | done 펄스 1사이클 후 IDLE |
+|  상태  | pipe_en | sel | lb_rst | 설명 |
+|------  |---------|-----|--------|------|
+| IDLE   |    0    |  0  |    0   | start 대기 |
+| LOAD   |    0    |  0  |    0   | 가중치 적재 완료 대기 |
+| RUN1   |    1    |  0  |    0   | 28×28 스캔, oc0~3 계산 |
+| FLUSH1 |    1    |  0  |    0   | 마지막 픽셀 파이프라인 드레인 (6사이클) |
+| LBRST  |    0    |  1  |    1   | line_buffer/window_register 클리어 (1사이클) |
+| RUN2   |    1    |  1  |    0   | 28×28 재스캔, oc4~7 계산 |
+| FLUSH2 |    1    |  1  |    0   | 마지막 픽셀 파이프라인 드레인 (6사이클) |
+| DONE   |    0    |  -  |    0   | done 펄스 1사이클 후 IDLE |
 
+1.IDLE
+아무것도 안 함. start 신호 대기
+
+2.LOAD
+load_start 펄스 발생 → weight_loader가 BRAM에서 가중치 읽기 시작
+load_done 올 때까지 대기 (약 40사이클)
+pipe_en=0 → 파이프라인 멈춤
+
+3.RUN1
+pipe_en=1, sel=0
+row/col 카운터가 돌면서 28×28=784 픽셀 순서대로 스캔
+scan_done(row=27, col=27)이 되면 FLUSH1으로
+
+4.FLUSH1
+pipe_en=1 유지 — 마지막 픽셀이 파이프라인 끝까지 흘러가게
+6사이클 카운트 후 LBRST로
+row/col은 0으로 리셋
+
+5.LBRST
+lb_rst=1 1사이클 — line_buffer와 window_register를 클리어
+RUN1에서 남은 데이터가 RUN2를 오염시키지 않도록
+sel=1로 변경, pipe_en=0
+
+6.RUN2
+pipe_en=1, sel=1
+동일한 28×28 픽셀 재스캔
+이번엔 w_regs[1] 가중치 사용 → oc4~7 계산
+
+7.FLUSH2 / DONE
+
+FLUSH1과 동일하게 6사이클 드레인
+DONE에서 done=1 펄스 1사이클
 ---
 
 ## 7. truncate_relu 연산 상세
@@ -219,14 +251,14 @@ sum (24-bit signed)
 
 ## 8. 주요 타이밍 수치 정리
 
-| 항목 | 값 |
-|------|-----|
-| 1회 스캔 사이클 수 | 784 (28×28) |
-| FLUSH 사이클 수 | 6 |
-| LBRST 사이클 수 | 1 |
-| 가중치 적재 사이클 수 | ~40 (BRAM 2사이클 레이턴시 포함) |
+|          항목         |      값      |
+|-----------------------|--------------|
+|   1회 스캔 사이클 수   | 784 (28×28)  |
+|    FLUSH 사이클 수     |      6      |
+|    LBRST 사이클 수     |      1      |
+| 가중치 적재 사이클 수   | ~40 (BRAM 2사이클 레이턴시 포함) |
 | 전체 실행 사이클 (대략) | 40 + 784 + 6 + 1 + 784 + 6 + 1 ≈ **1622사이클** |
-| 유효 출력 픽셀 수 | 26×26 = 676개 × 8채널 |
+|    유효 출력 픽셀 수    | 26×26 = 676개 × 8채널 |
 
 ---
 

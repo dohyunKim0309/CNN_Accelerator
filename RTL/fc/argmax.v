@@ -1,25 +1,16 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: fc_argmax
+// Module Name: fc_simd_argmax
 // Description:
-//   FC layer 의 10개 logit 중 최댓값의 index(0~9, 분류 클래스)를 찾는 모듈.
-//   logit 이 OC 0 → 9 순서로 1개씩 streaming 으로 들어옴 (in_valid pulse).
-//
-//   ★ 출력은 argmax index(0~9) 만. (max logit 값은 출력 안 함)
+//   FC SIMD 병렬 argmax.
+//   engine 에서 10개 logit 이 모두 준비된 뒤 in_valid=1 과 함께
+//   logit_flat[239:0] (10 × 24-bit signed) 을 한꺼번에 받아 비교.
 //
 //   동작:
-//     start=1 cycle : 비교기 초기화 (best 를 가장 작은 값으로, idx 0)
-//     in_valid=1    : in_logit 을 현재 best 와 비교, 더 크면 갱신
-//                     (동률 시 먼저 들어온(작은 index) 유지 → strict '>')
-//     10개 모두 비교 후 done=1 pulse, class_idx 확정.
+//     in_valid=1 : logit_flat 에서 combinational 최댓값 탐색
+//                  → 다음 edge 에 class_idx / done 확정.
 //
-//   인터페이스 가정:
-//     - 10개 logit 이 순차적으로 들어온다 (fc_engine 이 OC 마다 in_valid strobe).
-//     - 마지막(10번째, OC=9) logit 의 in_valid 직후 done pulse.
-//
-//   ping-pong buffer 에 쓰지 않고 곧바로 argmax → 최종 분류 인덱스만 출력.
-//
-//   Latency: 1 cycle per compare
+//   Latency: 1 cycle (in_valid → done)
 //////////////////////////////////////////////////////////////////////////////////
 
 module fc_argmax #(
@@ -28,59 +19,47 @@ module fc_argmax #(
     input  wire                    clk,
     input  wire                    rst,
 
-    input  wire                    start,      // 1-cycle: 새 image 비교 시작 (초기화)
-    input  wire                    in_valid,   // 1-cycle per logit
-    input  wire signed [ACC_W-1:0] in_logit,   // OC logit (순서대로 0..9)
+    input  wire                    in_valid,          // 1-cycle pulse: 10개 logit 준비 완료
+    input  wire [10*ACC_W-1:0]     logit_flat,        // 10 × ACC_W-bit signed
 
-    output reg  [3:0]              class_idx,  // argmax (0~9)
-    output reg                     done        // 10개 비교 완료 1-cycle pulse
+    output reg  [3:0]              class_idx,
+    output reg                     done
 );
 
-    // 현재까지 들어온 logit 개수 (0~9)
-    reg [3:0] logit_cnt;
+    // unpack
+    wire signed [ACC_W-1:0] logit [0:9];
+    genvar gi;
+    generate
+        for (gi = 0; gi < 10; gi = gi + 1) begin : unpack
+            assign logit[gi] = logit_flat[gi*ACC_W +: ACC_W];
+        end
+    endgenerate
 
-    // best 후보 (비교 진행 중)
-    reg [3:0]              best_idx;
-    reg signed [ACC_W-1:0] best_val;
+    // combinational 비교 트리 (10개 순차, 합성 시 병렬 최적화)
+    reg [3:0]              best_idx_c;
+    reg signed [ACC_W-1:0] best_val_c;
 
-    // 가장 작은 값으로 초기화 (ACC_W-bit signed 최소값)
-    localparam signed [ACC_W-1:0] NEG_MIN = {1'b1, {(ACC_W-1){1'b0}}};
+    integer oc;
+    always @(*) begin
+        best_idx_c = 4'd0;
+        best_val_c = logit[0];
+        for (oc = 1; oc < 10; oc = oc + 1) begin
+            if (logit[oc] > best_val_c) begin
+                best_val_c = logit[oc];
+                best_idx_c = oc[3:0];
+            end
+        end
+    end
 
     always @(posedge clk) begin
         if (rst) begin
-            logit_cnt <= 4'd0;
-            best_idx  <= 4'd0;
-            best_val  <= NEG_MIN;
             class_idx <= 4'd0;
             done      <= 1'b0;
         end else begin
             done <= 1'b0;
-
-            if (start) begin
-                // 새 image: 비교 초기화
-                logit_cnt <= 4'd0;
-                best_idx  <= 4'd0;
-                best_val  <= NEG_MIN;
-            end
-
             if (in_valid) begin
-                // strict '>' : 동률이면 먼저 들어온(작은 idx) 클래스 유지
-                if (in_logit > best_val) begin
-                    best_val <= in_logit;
-                    best_idx <= logit_cnt;       // 현재 logit 의 OC index
-                end
-
-                // 마지막(10번째) logit 이면 결과 확정 + done
-                if (logit_cnt == 4'd9) begin
-                    if (in_logit > best_val)
-                        class_idx <= 4'd9;
-                    else
-                        class_idx <= best_idx;
-                    done      <= 1'b1;
-                    logit_cnt <= 4'd0;
-                end else begin
-                    logit_cnt <= logit_cnt + 4'd1;
-                end
+                class_idx <= best_idx_c;
+                done      <= 1'b1;
             end
         end
     end

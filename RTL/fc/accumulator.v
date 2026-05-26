@@ -1,101 +1,75 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: fc_adder_tree
+// Module Name: fc_simd_accumulator
 // Description:
-//   16:1 signed adder tree (4-stage pipeline).
-//   한 spatial 위치 s 의 16 channel product (16-bit signed) 를 합산하여
-//   1개 partial sum (20-bit signed) 출력.
+//   FC SIMD 누산기.
+//   현재 pair 의 2 OC(even/odd) 를 144 spatial 동안 누산.
+//   s_last 사이클에 마지막 partial sum 까지 포함한 최종값을 logit0/1 에 출력하고
+//   logit_valid 를 1-cycle pulse 로 올림.
 //
-//   비트 폭 계산:
-//     16-bit 16개 합: 16 + ceil(log2(16)) = 16 + 4 = 20-bit
+//   pair 0→4 에 걸쳐 총 5번 logit_valid 가 발생하며,
+//   engine 상위에서 10개 logit 을 레지스터에 누적한 뒤 argmax 에 1회 전달.
 //
-//   Stage 구조 (각 stage 1-cycle pipeline register):
-//     Stage 1: 16 → 8  (8 adders, 16+16 → 17-bit)
-//     Stage 2:  8 → 4  (4 adders, 17+17 → 18-bit)
-//     Stage 3:  4 → 2  (2 adders, 18+18 → 19-bit)
-//     Stage 4:  2 → 1  (1 adder, 19+19 → 20-bit)
-//
-//   Total latency: 4 cycle (input → output)
-//   Throughput   : 1 result/cycle (en=1 동안)
-//
-//   conv2 의 krow_ic_adder_tree 와 동일한 설계 철학 (단 24:1 → 16:1).
+//   Latency:
+//     en && last 가 assert 된 바로 그 edge 에서
+//     acc + sum 의 최종값을 logit0/1 에 동시에 latch하고
+//     logit_valid 도 같은 edge 에서 1로 세팅.
+//     (상위에서는 logit_valid=1 인 cycle 에 logit0/1 을 캡처하면 됨)
 //////////////////////////////////////////////////////////////////////////////////
 
-module fc_adder_tree (
-    input  wire                clk,
-    input  wire                rst,
-    input  wire                en,             // pipeline enable
+module fc_accumulator #(
+    parameter ACC_W = 24
+)(
+    input  wire                    clk,
+    input  wire                    rst,
+    input  wire                    en,
+    input  wire                    clear,    // s_first 정렬 신호 (acc 초기화)
+    input  wire                    last,     // s_last  정렬 신호 (최종값 출력)
 
-    input  wire [16*16-1:0]    in_flat,        // 16 × 16-bit signed product
+    input  wire signed [19:0]      sum0,     // OC_even partial sum
+    input  wire signed [19:0]      sum1,     // OC_odd  partial sum
 
-    output reg  signed [19:0]  sum             // 20-bit signed
+    output reg  signed [ACC_W-1:0] logit0,   // OC_even 최종 logit
+    output reg  signed [ACC_W-1:0] logit1,   // OC_odd  최종 logit
+    output reg                     logit_valid  // 1-cycle pulse (pair 완료)
 );
 
-    //==========================================================================
-    // 0. 입력 unpack (16개 16-bit signed)
-    //==========================================================================
-    wire signed [15:0] in_arr [0:15];
+    reg signed [ACC_W-1:0] acc0, acc1;
 
-    genvar gi;
-    generate
-        for (gi = 0; gi < 16; gi = gi + 1) begin : unpack
-            assign in_arr[gi] = in_flat[gi*16 +: 16];
-        end
-    endgenerate
-
-    //==========================================================================
-    // 1. Stage 1: 16 → 8 (8 adders, 16+16 → 17-bit)
-    //==========================================================================
-    reg signed [16:0] s1 [0:7];
-    integer i1;
     always @(posedge clk) begin
         if (rst) begin
-            for (i1 = 0; i1 < 8; i1 = i1 + 1)
-                s1[i1] <= 17'sd0;
-        end else if (en) begin
-            for (i1 = 0; i1 < 8; i1 = i1 + 1)
-                s1[i1] <= in_arr[i1*2] + in_arr[i1*2 + 1];
-        end
-    end
+            acc0        <= {ACC_W{1'b0}};
+            acc1        <= {ACC_W{1'b0}};
+            logit0      <= {ACC_W{1'b0}};
+            logit1      <= {ACC_W{1'b0}};
+            logit_valid <= 1'b0;
+        end else begin
+            logit_valid <= 1'b0;   // default: deassert
 
-    //==========================================================================
-    // 2. Stage 2: 8 → 4 (4 adders, 17+17 → 18-bit)
-    //==========================================================================
-    reg signed [17:0] s2 [0:3];
-    integer i2;
-    always @(posedge clk) begin
-        if (rst) begin
-            for (i2 = 0; i2 < 4; i2 = i2 + 1)
-                s2[i2] <= 18'sd0;
-        end else if (en) begin
-            for (i2 = 0; i2 < 4; i2 = i2 + 1)
-                s2[i2] <= s1[i2*2] + s1[i2*2 + 1];
-        end
-    end
+            if (en) begin
+                // 누산
+                if (clear) begin
+                    acc0 <= $signed(sum0);
+                    acc1 <= $signed(sum1);
+                end else begin
+                    acc0 <= acc0 + $signed(sum0);
+                    acc1 <= acc1 + $signed(sum1);
+                end
 
-    //==========================================================================
-    // 3. Stage 3: 4 → 2 (2 adders, 18+18 → 19-bit)
-    //==========================================================================
-    reg signed [18:0] s3 [0:1];
-    integer i3;
-    always @(posedge clk) begin
-        if (rst) begin
-            for (i3 = 0; i3 < 2; i3 = i3 + 1)
-                s3[i3] <= 19'sd0;
-        end else if (en) begin
-            for (i3 = 0; i3 < 2; i3 = i3 + 1)
-                s3[i3] <= s2[i3*2] + s2[i3*2 + 1];
+                // last: 현재 edge 의 sum 이 마지막 → 최종값 = acc(이전) + sum
+                // clear 와 last 가 동시에 올 수 있는 경우(144=1, 실제 없음)도 처리
+                if (last) begin
+                    if (clear) begin
+                        logit0 <= $signed(sum0);
+                        logit1 <= $signed(sum1);
+                    end else begin
+                        logit0 <= acc0 + $signed(sum0);
+                        logit1 <= acc1 + $signed(sum1);
+                    end
+                    logit_valid <= 1'b1;
+                end
+            end
         end
-    end
-
-    //==========================================================================
-    // 4. Stage 4: 2 → 1 (1 adder, 19+19 → 20-bit)
-    //==========================================================================
-    always @(posedge clk) begin
-        if (rst)
-            sum <= 20'sd0;
-        else if (en)
-            sum <= s3[0] + s3[1];
     end
 
 endmodule

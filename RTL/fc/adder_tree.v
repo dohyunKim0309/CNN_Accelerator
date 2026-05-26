@@ -1,101 +1,105 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: fc_adder_tree
+// Module Name: fc_simd_adder_tree
 // Description:
-//   16:1 signed adder tree (4-stage pipeline).
-//   한 spatial 위치 s 의 16 channel product (16-bit signed) 를 합산하여
-//   1개 partial sum (20-bit signed) 출력.
+//   FC SIMD 16:1 adder tree × 2 OC (현재 처리 중인 pair의 even/odd).
+//   4-stage pipeline, 1 result/cycle throughput.
 //
-//   비트 폭 계산:
-//     16-bit 16개 합: 16 + ceil(log2(16)) = 16 + 4 = 20-bit
+//   입력: p0_flat/p1_flat [255:0] (16 × 16-bit signed product)
+//   출력: sum0/sum1       [19:0]  (20-bit signed partial sum)
 //
-//   Stage 구조 (각 stage 1-cycle pipeline register):
-//     Stage 1: 16 → 8  (8 adders, 16+16 → 17-bit)
-//     Stage 2:  8 → 4  (4 adders, 17+17 → 18-bit)
-//     Stage 3:  4 → 2  (2 adders, 18+18 → 19-bit)
-//     Stage 4:  2 → 1  (1 adder, 19+19 → 20-bit)
-//
-//   Total latency: 4 cycle (input → output)
-//   Throughput   : 1 result/cycle (en=1 동안)
-//
-//   conv2 의 krow_ic_adder_tree 와 동일한 설계 철학 (단 24:1 → 16:1).
+//   Latency: 4 cycle
 //////////////////////////////////////////////////////////////////////////////////
 
 module fc_adder_tree (
-    input  wire                clk,
-    input  wire                rst,
-    input  wire                en,             // pipeline enable
+    input  wire         clk,
+    input  wire         rst,
+    input  wire         en,
 
-    input  wire [16*16-1:0]    in_flat,        // 16 × 16-bit signed product
+    input  wire [255:0] p0_flat,   // OC_even 16 × 16b
+    input  wire [255:0] p1_flat,   // OC_odd  16 × 16b
 
-    output reg  signed [19:0]  sum             // 20-bit signed
+    output reg signed [19:0] sum0, // OC_even partial sum
+    output reg signed [19:0] sum1  // OC_odd  partial sum
 );
 
-    //==========================================================================
-    // 0. 입력 unpack (16개 16-bit signed)
-    //==========================================================================
-    wire signed [15:0] in_arr [0:15];
-
+    // 입력 unpack
+    wire signed [15:0] p0 [0:15];
+    wire signed [15:0] p1 [0:15];
     genvar gi;
     generate
         for (gi = 0; gi < 16; gi = gi + 1) begin : unpack
-            assign in_arr[gi] = in_flat[gi*16 +: 16];
+            assign p0[gi] = p0_flat[gi*16 +: 16];
+            assign p1[gi] = p1_flat[gi*16 +: 16];
         end
     endgenerate
 
-    //==========================================================================
-    // 1. Stage 1: 16 → 8 (8 adders, 16+16 → 17-bit)
-    //==========================================================================
-    reg signed [16:0] s1 [0:7];
-    integer i1;
+    // --- OC_even tree ---
+    reg signed [16:0] e1 [0:7];
+    reg signed [17:0] e2 [0:3];
+    reg signed [18:0] e3 [0:1];
+
+    // --- OC_odd tree ---
+    reg signed [16:0] o1 [0:7];
+    reg signed [17:0] o2 [0:3];
+    reg signed [18:0] o3 [0:1];
+
+    integer i;
+
+    // Stage 1
     always @(posedge clk) begin
         if (rst) begin
-            for (i1 = 0; i1 < 8; i1 = i1 + 1)
-                s1[i1] <= 17'sd0;
+            for (i = 0; i < 8; i = i + 1) begin
+                e1[i] <= 17'sd0;
+                o1[i] <= 17'sd0;
+            end
         end else if (en) begin
-            for (i1 = 0; i1 < 8; i1 = i1 + 1)
-                s1[i1] <= in_arr[i1*2] + in_arr[i1*2 + 1];
+            for (i = 0; i < 8; i = i + 1) begin
+                e1[i] <= p0[i*2] + p0[i*2+1];
+                o1[i] <= p1[i*2] + p1[i*2+1];
+            end
         end
     end
 
-    //==========================================================================
-    // 2. Stage 2: 8 → 4 (4 adders, 17+17 → 18-bit)
-    //==========================================================================
-    reg signed [17:0] s2 [0:3];
-    integer i2;
+    // Stage 2
     always @(posedge clk) begin
         if (rst) begin
-            for (i2 = 0; i2 < 4; i2 = i2 + 1)
-                s2[i2] <= 18'sd0;
+            for (i = 0; i < 4; i = i + 1) begin
+                e2[i] <= 18'sd0;
+                o2[i] <= 18'sd0;
+            end
         end else if (en) begin
-            for (i2 = 0; i2 < 4; i2 = i2 + 1)
-                s2[i2] <= s1[i2*2] + s1[i2*2 + 1];
+            for (i = 0; i < 4; i = i + 1) begin
+                e2[i] <= e1[i*2] + e1[i*2+1];
+                o2[i] <= o1[i*2] + o1[i*2+1];
+            end
         end
     end
 
-    //==========================================================================
-    // 3. Stage 3: 4 → 2 (2 adders, 18+18 → 19-bit)
-    //==========================================================================
-    reg signed [18:0] s3 [0:1];
-    integer i3;
+    // Stage 3
     always @(posedge clk) begin
         if (rst) begin
-            for (i3 = 0; i3 < 2; i3 = i3 + 1)
-                s3[i3] <= 19'sd0;
+            for (i = 0; i < 2; i = i + 1) begin
+                e3[i] <= 19'sd0;
+                o3[i] <= 19'sd0;
+            end
         end else if (en) begin
-            for (i3 = 0; i3 < 2; i3 = i3 + 1)
-                s3[i3] <= s2[i3*2] + s2[i3*2 + 1];
+            for (i = 0; i < 2; i = i + 1) begin
+                e3[i] <= e2[i*2] + e2[i*2+1];
+                o3[i] <= o2[i*2] + o2[i*2+1];
+            end
         end
     end
 
-    //==========================================================================
-    // 4. Stage 4: 2 → 1 (1 adder, 19+19 → 20-bit)
-    //==========================================================================
+    // Stage 4
     always @(posedge clk) begin
-        if (rst)
-            sum <= 20'sd0;
-        else if (en)
-            sum <= s3[0] + s3[1];
+        if (rst) begin
+            sum0 <= 20'sd0;
+            sum1 <= 20'sd0;
+        end else if (en) begin
+            sum0 <= e3[0] + e3[1];
+            sum1 <= o3[0] + o3[1];
+        end
     end
 
 endmodule

@@ -1,148 +1,108 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: fc_fsm
+// Module Name: fc_simd_fsm
 // Description:
-//   FC layer 의 제어 FSM (control plane).
-//   10개 output class(OC) 를 순차 처리하고, 각 OC 마다 144개 spatial 위치를
-//   scan 하여 buffer(activation) 와 weight BRAM 의 read addr 를 생성.
+//   FC SIMD FSM (20 DSP 제약 버전).
 //
-//   책임:
-//     - 상태 전이 (FSM)
-//     - OC counter (oc_cnt 0..9), spatial counter (s_cnt 0..143)
-//     - read addr 생성용 좌표 (oc_cnt, s_cnt)
-//     - compute valid(comp_v), oc 시작(oc_first_s), oc 마지막(oc_last_s) strobe
-//     - 입력 측 handshake (vs Maxpool, poolfc buffer)
-//
-//   책임 아님 (datapath = fc_engine.v 측):
-//     - 실제 BRAM addr 합성 ({bank_sel, addr})
-//     - pipeline delay 정렬 (accumulator clear/en, argmax in_valid)
-//     - argmax 결과 출력
-//
-//   FSM 상태:
-//     IDLE    : start 대기 (그리고 입력 data_ready 대기)
-//     COMPUTE : 10 OC × 144 spatial scan (issue read addr 매 cycle)
-//     DRAIN   : 마지막 spatial issue 후 pipeline drain (8 cycle)
-//               PE 1 + adder 4 + BRAM 2 + acc 1 = 8.
-//     DONE    : 1 image 처리 완료, argmax done 후 IDLE 복귀
+//   구조:
+//     5 pair (OC 0~9) 를 순차 처리, pair 당 144 spatial cycle.
+//     총 COMPUTE = 5 × 144 = 720 cycle (기존 1440 대비 2배 단축).
 //
 //   카운터:
-//     s_cnt  : 0..143 (현재 cycle 에 issue 하는 spatial read addr)
-//     oc_cnt : 0..9   (현재 처리 중인 output class)
-//     s_cnt == 143 의 다음 edge 에 oc_cnt++ , s_cnt → 0
-//     oc_cnt==9 && s_cnt==143 issue 후 DRAIN 진입
+//     s_cnt    : 0..143 (spatial, 매 cycle 증가)
+//     pair_cnt : 0..4   (현재 OC pair)
 //
-//   Handshake (vs Maxpool):
-//     prior_diff = (FC rdone count) - (Maxpool wdone count)
-//                  data_ready = (prior_diff < 0)  : 처리할 image 가 입력 bank 에 있음
-//     입력 bank_sel toggle on rdone.
-//     (FC 는 출력이 argmax 분류결과뿐이라 출력측 ping-pong handshake 불필요.)
+//   Weight BRAM 주소:
+//     addrb = pair_cnt * 144 + s_cnt (0..719)
+//     → wbase = pair_cnt * 144 (누산), addrb = wbase + s_cnt
+//     BRAM 구성: 128-bit × 720 (기존 1440 대신 720 depth)
+//               각 addr 에 w0(16ch)+w1(16ch) = 128-bit 저장
+//
+//   출력:
+//     s_cnt, pair_cnt, wbase : datapath 주소 생성용
+//     comp_v    : COMPUTE 중 매 cycle
+//     s_first   : s_cnt == 0 (acc clear)
+//     s_last    : s_cnt == 143 (acc last → logit valid)
+//     pair_done : s_last 와 동일 (argmax 에 pair 완료 통지)
+//
+//   Pipeline depth: BRAM 2 + pe 2 + adder 4 + acc 1 = 9
+//   DRAIN: 9 cycle
 //////////////////////////////////////////////////////////////////////////////////
 
 module fc_fsm (
     input  wire        clk,
     input  wire        rst,
+    input  wire        start,
 
-    //==========================================================================
-    // System control
-    //==========================================================================
-    input  wire        start,            // PS 로부터 1-cycle pulse (시스템 시작)
+    // Handshake
+    input  wire        prior_wdone,
+    output reg         rdone,
+    output reg         input_bank_sel,
 
-    //==========================================================================
-    // 입력측 handshake (vs Maxpool, poolfc buffer)
-    //==========================================================================
-    input  wire        prior_wdone,      // Maxpool 로부터 (외부)
-    output reg         rdone,            // FC → Maxpool (1-cycle, image read 완료)
-    output reg         input_bank_sel,   // poolfc ping-pong bank
+    // Datapath
+    output reg  [7:0]  s_cnt,
+    output reg  [2:0]  pair_cnt,
+    output reg  [9:0]  wbase,      // pair_cnt * 144 (누산)
 
-    //==========================================================================
-    // Datapath control
-    //==========================================================================
-    output reg  [7:0]  s_cnt,            // spatial read addr (0..143)
-    output reg  [3:0]  oc_cnt,           // output class (0..9)
-    output reg  [10:0] wbase,            // weight BRAM base = oc_cnt*144 (누산, 곱셈기 없음)
+    output reg         comp_v,
+    output reg         s_first,
+    output reg         s_last,
 
-    output reg         comp_v,           // compute valid (이 cycle 에 addr issue)
-    output reg         oc_first_s,       // 이 cycle issue 가 해당 OC 의 s=0
-    output reg         oc_last_s,        // 이 cycle issue 가 해당 OC 의 s=143
-
-    //==========================================================================
-    // Status
-    //==========================================================================
-    output reg         busy              // COMPUTE/DRAIN 동안 1
+    output reg         busy
 );
 
-    //==========================================================================
-    // 1. 상태 정의
-    //==========================================================================
     localparam [1:0] IDLE    = 2'd0;
     localparam [1:0] COMPUTE = 2'd1;
     localparam [1:0] DRAIN   = 2'd2;
     localparam [1:0] DONE    = 2'd3;
 
-    reg [1:0] state;
+    // Pipeline depth: BRAM 2 + pe_cell 2 + adder 4 + acc 1 = 9
+    localparam [3:0] DRAIN_MAX = 4'd9;
 
-    //==========================================================================
-    // 2. drain counter (pipeline depth = 8)
-    //   BRAM 2 + pe 1 + adder 4 + acc 1 = 8
-    //==========================================================================
-    localparam [3:0] DRAIN_MAX = 4'd8;
+    reg [1:0] state;
     reg [3:0] drain_cnt;
 
-    //==========================================================================
-    // 3. Handshake 차이 카운터 (signed 3-bit)
-    //==========================================================================
     reg signed [2:0] prior_diff;
     wire data_ready = (prior_diff < 3'sd0);
 
     //==========================================================================
-    // 4. State + counter update
+    // State + counter
     //==========================================================================
     always @(posedge clk) begin
         if (rst) begin
             state     <= IDLE;
             s_cnt     <= 8'd0;
-            oc_cnt    <= 4'd0;
-            wbase     <= 11'd0;
+            pair_cnt  <= 3'd0;
+            wbase     <= 10'd0;
             drain_cnt <= 4'd0;
         end else begin
             case (state)
-                //------------------------------------------------------------------
-                // IDLE: start & data_ready 대기
-                //------------------------------------------------------------------
                 IDLE: begin
-                    s_cnt  <= 8'd0;
-                    oc_cnt <= 4'd0;
-                    wbase  <= 11'd0;
+                    s_cnt    <= 8'd0;
+                    pair_cnt <= 3'd0;
+                    wbase    <= 10'd0;
                     if (start && data_ready)
                         state <= COMPUTE;
                 end
 
-                //------------------------------------------------------------------
-                // COMPUTE: 매 cycle spatial addr issue (s 0..143), OC 0..9
-                //   wbase 는 OC 가 넘어갈 때마다 +144 누산 (곱셈기 제거).
-                //   weight BRAM addr = wbase + s_cnt (덧셈만).
-                //------------------------------------------------------------------
                 COMPUTE: begin
                     if (s_cnt == 8'd143) begin
                         s_cnt <= 8'd0;
-                        if (oc_cnt == 4'd9) begin
-                            // 마지막 OC 의 마지막 spatial issue 완료 → DRAIN
-                            oc_cnt    <= 4'd0;
-                            wbase     <= 11'd0;
+                        if (pair_cnt == 3'd4) begin
+                            // 마지막 pair 완료 → DRAIN
+                            pair_cnt  <= 3'd0;
+                            wbase     <= 10'd0;
                             state     <= DRAIN;
                             drain_cnt <= 4'd0;
                         end else begin
-                            oc_cnt <= oc_cnt + 4'd1;
-                            wbase  <= wbase + 11'd144;   // 다음 OC base
+                            pair_cnt <= pair_cnt + 3'd1;
+                            wbase    <= wbase + 10'd144;
                         end
                     end else begin
                         s_cnt <= s_cnt + 8'd1;
                     end
                 end
 
-                //------------------------------------------------------------------
-                // DRAIN: pipeline 비우기 (8 cycle), 마지막 logit 까지 acc/argmax 도달
-                //------------------------------------------------------------------
                 DRAIN: begin
                     if (drain_cnt == DRAIN_MAX - 4'd1) begin
                         state     <= DONE;
@@ -152,53 +112,45 @@ module fc_fsm (
                     end
                 end
 
-                //------------------------------------------------------------------
-                // DONE: 1 image 완료. IDLE 복귀 (다음 image).
-                //------------------------------------------------------------------
-                DONE: begin
-                    state <= IDLE;
-                end
-
+                DONE:    state <= IDLE;
                 default: state <= IDLE;
             endcase
         end
     end
 
     //==========================================================================
-    // 5. Datapath control strobe (combinational from state/counters)
+    // Datapath strobes (combinational)
     //==========================================================================
     always @(*) begin
-        comp_v     = 1'b0;
-        oc_first_s = 1'b0;
-        oc_last_s  = 1'b0;
-        busy       = (state == COMPUTE) || (state == DRAIN);
+        comp_v  = 1'b0;
+        s_first = 1'b0;
+        s_last  = 1'b0;
+        busy    = (state == COMPUTE) || (state == DRAIN);
 
         if (state == COMPUTE) begin
-            comp_v     = 1'b1;
-            oc_first_s = (s_cnt == 8'd0);
-            oc_last_s  = (s_cnt == 8'd143);
+            comp_v  = 1'b1;
+            s_first = (s_cnt == 8'd0);
+            s_last  = (s_cnt == 8'd143);
         end
     end
 
     //==========================================================================
-    // 6. rdone pulse
-    //   COMPUTE 의 마지막 spatial issue (oc=9, s=143) 직후 image read 완료로 간주.
-    //   → 그 cycle 에 rdone pulse (입력 bank 해제, Maxpool 에 통지).
+    // rdone: 마지막 pair 마지막 spatial issue 직후
     //==========================================================================
     always @(posedge clk) begin
         if (rst)
             rdone <= 1'b0;
         else
-            rdone <= (state == COMPUTE) && (oc_cnt == 4'd9) && (s_cnt == 8'd143);
+            rdone <= (state == COMPUTE) && (pair_cnt == 3'd4) && (s_cnt == 8'd143);
     end
 
     //==========================================================================
-    // 7. Handshake counter + bank toggle
+    // Handshake + bank toggle
     //==========================================================================
     always @(posedge clk) begin
-        if (rst) begin
+        if (rst)
             prior_diff <= 3'sd0;
-        end else begin
+        else begin
             case ({rdone, prior_wdone})
                 2'b10:   prior_diff <= prior_diff + 3'sd1;
                 2'b01:   prior_diff <= prior_diff - 3'sd1;

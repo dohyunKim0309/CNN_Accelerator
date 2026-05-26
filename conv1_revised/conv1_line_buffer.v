@@ -13,7 +13,7 @@
 //     → din이 DEPTH+1 사이클 후 dout으로 나옴 (1행 지연)
 //////////////////////////////////////////////////////////////////////////////////
 
-module line_buffer #(
+module conv1_line_buffer #(
     parameter integer WIDTH = 8,
     parameter integer DEPTH = 27
 )(

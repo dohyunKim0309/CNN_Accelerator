@@ -8,14 +8,14 @@
 //   타이밍 (Latency = 2):
 //     T+0: load_start 수신 → req_cnt=0, active=1
 //     T+1: bram_addr=0 요청, latch_valid=1
-//     T+2: BRAM 내부 래치 단계, latch_valid_d=1
+//     T+2: BRAM 1st 파이프 단계, latch_valid_d=1
 //     T+3: BRAM output register 캡처 → bram_dout=data[0] 유효, latch_valid_dd=1로 SET
 //     T+4: latch_valid_dd 읽힘 → latch_cnt=0 적재 (bram_dout=data[0])
 //     ...
 //     T+39: latch_cnt=35 처리, load_done=1
 //////////////////////////////////////////////////////////////////////////////////
 
-module weight_loader #(
+module conv1_weight_loader #(
     parameter integer NUM_PE = 18,
     parameter integer ADDR_W = 6
 )(

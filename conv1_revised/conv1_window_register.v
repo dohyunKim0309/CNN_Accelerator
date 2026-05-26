@@ -20,7 +20,7 @@
 //   rst=1이면 전체 레지스터 0 초기화
 //////////////////////////////////////////////////////////////////////////////////
 
-module window_register #(
+module conv1_window_register #(
     parameter integer WIDTH = 8
 )(
     input  wire             clk,

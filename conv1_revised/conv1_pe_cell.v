@@ -30,7 +30,7 @@
 //     - psum0/psum1    → mul0/mul1 로 통일 (adder_tree 입력)
 //////////////////////////////////////////////////////////////////////////////////
 
-module pe_cell #(
+module conv1_pe_cell #(
     parameter integer DEPTH  = 2,
     parameter integer ADDR_W = 1    // $clog2(DEPTH), DEPTH=2이면 1
 )(
@@ -87,7 +87,7 @@ module pe_cell #(
     //==========================================================================
     wire [47:0] P;
 
-    DSP48E1 #(
+DSP48E1 #(
         .A_INPUT            ("DIRECT"),
         .B_INPUT            ("DIRECT"),
         .USE_DPORT          ("FALSE"),
@@ -101,17 +101,17 @@ module pe_cell #(
         .USE_PATTERN_DETECT ("NO_PATDET"),
         .ACASCREG           (1),
         .ADREG              (0),
-        .ALUMODEREG         (1),
+        .ALUMODEREG         (0), // ★ 0으로 변경 (고정 제어 신호이므로 레지스터 제거)
         .AREG               (1),
         .BCASCREG           (1),
         .BREG               (1),
-        .CARRYINREG         (1),
-        .CARRYINSELREG      (1),
-        .CREG               (1),
+        .CARRYINREG         (0), // ★ 0으로 변경
+        .CARRYINSELREG      (0), // ★ 0으로 변경 (Warning 제거 핵심)
+        .CREG               (0), // ★ 사용 안 하므로 0
         .DREG               (0),
-        .INMODEREG          (1),
+        .INMODEREG          (0), // ★ 0으로 변경
         .MREG               (1),
-        .OPMODEREG          (1),
+        .OPMODEREG          (0), // ★ 0으로 변경 (Warning 및 무조건적 연산 매칭 제어)
         .PREG               (1)
     ) dsp_inst (
         // Unused cascade
@@ -131,11 +131,13 @@ module pe_cell #(
         .CARRYINSEL     (3'b000),
         .CLK            (clk),
         .INMODE         (5'b00000),
-        // ★ OPMODE 수정: X=M, Y=0, Z=0 → P = M = A×B
-        .OPMODE         (7'b0000001),
+        
+        // ★ 핵심 수정: X=M, Y=M, Z=0 조합인 7'b0000101 로 변경해야 하드웨어 규칙에 맞습니다.
+        .OPMODE         (7'b0000101), 
+        
         // Data inputs
         .A              ({{5{active_w[24]}}, active_w[24:0]}),  // 30bit sign-ext
-        .B              ({{10{x[7]}}, x[7:0]}),                 // 18bit sign-ext
+        .B              ({{10{x[7]}}, x[7:0]}),                  // 18bit sign-ext
         .C              (48'b0),
         .CARRYIN        (1'b0),
         .D              (25'b0),
@@ -148,7 +150,7 @@ module pe_cell #(
         .CEP            (en),
         // CE - unused
         .CEAD           (1'b0),  .CEC     (1'b0),  .CED     (1'b0),
-        // CE - control (항상 유지)
+        // CE - control
         .CEALUMODE      (1'b1),  .CECARRYIN(1'b1),
         .CECTRL         (1'b1),  .CEINMODE (1'b1),
         // Reset - active registers
@@ -159,7 +161,6 @@ module pe_cell #(
         // Reset - inactive
         .RSTC           (1'b0),  .RSTD  (1'b0)
     );
-
     //==========================================================================
     // 4. 결과 추출
     //    P = W1×X×2^17 + W0×X

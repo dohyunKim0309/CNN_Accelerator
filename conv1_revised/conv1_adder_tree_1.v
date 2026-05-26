@@ -14,7 +14,7 @@
 //   레이턴시: 1사이클 (등록 출력)
 //////////////////////////////////////////////////////////////////////////////////
 
-module adder_tree (
+module conv1_adder_tree (
     input  wire        clk,
     input  wire        rst,
     input  wire        en,

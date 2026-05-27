@@ -1,6 +1,5 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: fc_simd_accumulator
 // Description:
 //   FC SIMD 누산기.
 //   현재 pair 의 2 OC(even/odd) 를 144 spatial 동안 누산.

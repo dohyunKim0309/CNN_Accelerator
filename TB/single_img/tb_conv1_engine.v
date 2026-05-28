@@ -17,9 +17,9 @@
 //     done 시 c1c2 BMG bank 0 에 8 OC × 26×26 결과 완성.
 //////////////////////////////////////////////////////////////////////////////////
 
-`define CONV1_INPUT_HEX   "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_input.hex"
-`define CONV1_WEIGHT_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_weights_simd.hex"
-`define CONV1_EXPECTED_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_output_c1c2.hex"
+`define CONV1_INPUT_HEX    "conv1_input.hex"
+`define CONV1_WEIGHT_HEX   "conv1_weights_simd.hex"
+`define CONV1_EXPECTED_HEX "conv1_output_c1c2.hex"
 
 
 module tb_conv1_engine;
@@ -28,7 +28,7 @@ module tb_conv1_engine;
     // Clock / reset (100 MHz)
     //==========================================================================
     reg clk = 1'b0;
-    reg rst_n = 1'b0;
+    reg rst  = 1'b1;   // active-high: 시작 시 리셋 상태
     always #5 clk = ~clk;
 
     //==========================================================================
@@ -113,7 +113,7 @@ module tb_conv1_engine;
     //==========================================================================
     conv1_engine dut (
         .clk          (clk),
-        .rst_n        (rst_n),
+        .rst          (rst),
         .start        (start),
         .done         (done),
 
@@ -148,7 +148,7 @@ module tb_conv1_engine;
     integer cycle_at_start, cycle_at_done;
 
     initial cycle_cnt = 0;
-    always @(posedge clk) if (rst_n) cycle_cnt <= cycle_cnt + 1;
+    always @(posedge clk) if (!rst) cycle_cnt <= cycle_cnt + 1;
 
     //==========================================================================
     // Task: init_input — Port A 로 784 cycle 동안 input image write
@@ -247,11 +247,11 @@ module tb_conv1_engine;
         $display("[TB] Loading expected: %s", `CONV1_EXPECTED_HEX);
         $readmemh(`CONV1_EXPECTED_HEX, expected_c1c2);
 
-        // Reset
-        rst_n = 1'b0;
+        // Reset (active-high: rst=1 → rst=0)
+        rst = 1'b1;
         repeat (10) @(posedge clk);
         @(negedge clk);
-        rst_n = 1'b1;
+        rst = 1'b0;
         $display("[TB] @ cycle %0d : reset released", cycle_cnt);
 
         // Init BMGs (Port A driving)

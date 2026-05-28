@@ -106,28 +106,34 @@ module conv1_engine (
 
     //==========================================================================
     // 4. line_buffer x 2 (27-depth 구동으로 28클럭 지연 유도)
+    //
+    //   공용 모듈 `line_buffer` (RTL/conv2/) 사용. active-high rst 로 통일됨.
+    //   active-low rst_n + active-high lb_rst → 둘 중 하나면 reset:
+    //     lb_rst_combined = ~rst_n | lb_rst
+    //   (= 옛 `lb_rst_combined_n = rst_n & ~lb_rst` 의 De Morgan 변환)
     //==========================================================================
     wire signed [7:0] lb1_out, lb2_out;
-    // active-low 결합: 외부 rst_n=0 또는 내부 lb_rst=1 이면 리셋
-    wire lb_rst_combined_n = rst_n & ~lb_rst;
+    wire lb_rst_combined = ~rst_n | lb_rst;
 
-    conv1_line_buffer #(.WIDTH(8), .DEPTH(27)) lb1 (
-        .clk(clk), .rst_n(lb_rst_combined_n), .en(pipe_en),
+    line_buffer #(.WIDTH(8), .DEPTH(27)) lb1 (
+        .clk(clk), .rst(lb_rst_combined), .en(pipe_en),
         .din(in_bram_dout), .dout(lb1_out)
     );
 
-    conv1_line_buffer #(.WIDTH(8), .DEPTH(27)) lb2 (
-        .clk(clk), .rst_n(lb_rst_combined_n), .en(pipe_en),
+    line_buffer #(.WIDTH(8), .DEPTH(27)) lb2 (
+        .clk(clk), .rst(lb_rst_combined), .en(pipe_en),
         .din(lb1_out), .dout(lb2_out)
     );
 
     //==========================================================================
     // 5. window_register
+    //
+    //   공용 모듈 `window_register` (RTL/conv2/) 사용. active-high rst.
     //==========================================================================
     wire signed [7:0] k0,k1,k2,k3,k4,k5,k6,k7,k8;
 
-    conv1_window_register #(.WIDTH(8)) win (
-        .clk(clk), .rst_n(lb_rst_combined_n), .en(pipe_en),
+    window_register #(.WIDTH(8)) win (
+        .clk(clk), .rst(lb_rst_combined), .en(pipe_en),
         .row2_in(in_bram_dout), .row1_in(lb1_out), .row0_in(lb2_out),
         .k0(k0),.k1(k1),.k2(k2),
         .k3(k3),.k4(k4),.k5(k5),
@@ -140,7 +146,10 @@ module conv1_engine (
     assign kx[6]=k6; assign kx[7]=k7; assign kx[8]=k8;
 
     //==========================================================================
-    // 6. pe_cell x 18
+    // 6. pe_cell x 18  (공용 모듈 `pe_cell` — RTL/core/)
+    //
+    //   active-high `rst` 로 통일됨 → conv1 의 active-low rst_n 을 `~rst_n` 으로 변환.
+    //   PE 는 round 전환 시 weight 유지 필수 → lb_rst 와 결합하지 않음 (시스템 reset 만).
     //==========================================================================
     wire signed [16:0] mul0_g1 [0:8];
     wire signed [16:0] mul1_g1 [0:8];
@@ -150,8 +159,8 @@ module conv1_engine (
     genvar gi;
     generate
         for (gi = 0; gi < 9; gi = gi + 1) begin : gen_g1
-            conv1_pe_cell #(.DEPTH(2), .ADDR_W(1)) pe (
-                .clk(clk), .rst_n(rst_n),
+            pe_cell #(.DEPTH(2)) pe (
+                .clk(clk), .rst(~rst_n),
                 .packed_w(pe_packed_w),
                 .load_idx(pe_load_idx),
                 .load_en(pe_load_en[gi]),
@@ -163,8 +172,8 @@ module conv1_engine (
             );
         end
         for (gi = 0; gi < 9; gi = gi + 1) begin : gen_g2
-            conv1_pe_cell #(.DEPTH(2), .ADDR_W(1)) pe (
-                .clk(clk), .rst_n(rst_n),
+            pe_cell #(.DEPTH(2)) pe (
+                .clk(clk), .rst(~rst_n),
                 .packed_w(pe_packed_w),
                 .load_idx(pe_load_idx),
                 .load_en(pe_load_en[gi+9]),
@@ -179,6 +188,7 @@ module conv1_engine (
 
     //==========================================================================
     // 7. adder_tree x 2 (1클럭 내부 레지스터 지연 포함)
+    //   Conv1 전용 (9:2 토폴로지). RTL/conv1/conv1_adder_tree.v.
     //==========================================================================
     wire signed [23:0] sum0_g1, sum1_g1, sum0_g2, sum1_g2;
 
@@ -193,7 +203,7 @@ module conv1_engine (
         .sum0(sum0_g1), .sum1(sum1_g1)
     );
 
-    _conv1_adder_tree at_g2 (
+    conv1_adder_tree at_g2 (
         .clk(clk), .rst_n(rst_n), .en(pipe_en),
         .mul0_0(mul0_g2[0]),.mul0_1(mul0_g2[1]),.mul0_2(mul0_g2[2]),
         .mul0_3(mul0_g2[3]),.mul0_4(mul0_g2[4]),.mul0_5(mul0_g2[5]),
@@ -205,16 +215,25 @@ module conv1_engine (
     );
 
     //==========================================================================
-    // 8. truncate_relu
+    // 8. truncate_relu (공용 모듈 — RTL/core/truncate_relu.v, N=4)
+    //
+    //   Channel 매핑: ch0=sum0_g1, ch1=sum1_g1, ch2=sum0_g2, ch3=sum1_g2
+    //   (Conv1 design.md §5-4 참조)
     //==========================================================================
-    wire signed [7:0] tr_out0, tr_out1, tr_out2, tr_out3;
+    wire [95:0] tr_sum_flat = {sum1_g2, sum0_g2, sum1_g1, sum0_g1};
+    wire [31:0] tr_out_flat;
 
-    conv1_truncate_relu tr (
-        .clk(clk), .rst_n(rst_n), .en(pipe_en),
-        .sum0(sum0_g1), .sum1(sum1_g1),
-        .sum2(sum0_g2), .sum3(sum1_g2),
-        .out0(tr_out0), .out1(tr_out1),
-        .out2(tr_out2), .out3(tr_out3)
+    wire signed [7:0] tr_out0 = tr_out_flat[ 7: 0];
+    wire signed [7:0] tr_out1 = tr_out_flat[15: 8];
+    wire signed [7:0] tr_out2 = tr_out_flat[23:16];
+    wire signed [7:0] tr_out3 = tr_out_flat[31:24];
+
+    truncate_relu #(.N(4)) tr (
+        .clk      (clk),
+        .rst      (~rst_n),
+        .en       (pipe_en),
+        .sum_flat (tr_sum_flat),
+        .out_flat (tr_out_flat)
     );
 
     //==========================================================================

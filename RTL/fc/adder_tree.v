@@ -1,6 +1,5 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: fc_simd_adder_tree
 // Description:
 //   FC SIMD 16:1 adder tree × 2 OC (현재 처리 중인 pair의 even/odd).
 //   4-stage pipeline, 1 result/cycle throughput.
@@ -19,7 +18,7 @@ module fc_adder_tree (
     input  wire [255:0] p0_flat,   // OC_even 16 × 16b
     input  wire [255:0] p1_flat,   // OC_odd  16 × 16b
 
-    output reg signed [19:0] sum0, // OC_even partial sum
+    output reg signed [19:0] sum0, // OC_even partial sum       => sum은 accumulator에서 다시 합쳐짐
     output reg signed [19:0] sum1  // OC_odd  partial sum
 );
 
@@ -35,7 +34,7 @@ module fc_adder_tree (
     endgenerate
 
     // --- OC_even tree ---
-    reg signed [16:0] e1 [0:7];
+    reg signed [16:0] e1 [0:7];         // 2개씩 묶어서 계산하니까 절반씩 감소함
     reg signed [17:0] e2 [0:3];
     reg signed [18:0] e3 [0:1];
 

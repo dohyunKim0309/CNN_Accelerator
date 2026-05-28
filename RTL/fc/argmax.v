@@ -1,6 +1,5 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: fc_simd_argmax
 // Description:
 //   FC SIMD 병렬 argmax.
 //   engine 에서 10개 logit 이 모두 준비된 뒤 in_valid=1 과 함께

@@ -1,32 +1,20 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: fc_simd_fsm
+// Module Name: fc_fsm
 // Description:
-//   FC SIMD FSM (20 DSP 제약 버전).
+//   FC layer FSM for input layout: input BRAM width = 16*8 = 128-bit,
+//   depth = 144 spatial words.
 //
-//   구조:
-//     5 pair (OC 0~9) 를 순차 처리, pair 당 288 spatial cycle.
-//     총 COMPUTE = 5 × 288 = 1440 cycle.
+//   Weight BRAM layout:
+//     width = 256-bit, depth = 720
+//     addr  = pair_cnt * 144 + s_cnt
+//     LSB [127:0]   = even output column weights, 16ch
+//     MSB [255:128] = odd  output column weights, 16ch
 //
-//   카운터:
-//     s_cnt    : 0..287 (spatial, 매 cycle 증가)
-//     pair_cnt : 0..4   (현재 OC pair)
-//
-//   Weight BRAM 주소:
-//     addrb = pair_cnt * 288 + s_cnt (0..1439)
-//     → wbase = pair_cnt * 288 (누산), addrb = wbase + s_cnt
-//     BRAM 구성: 128-bit × 1440
-//               각 addr 에 w0(8ch)+w1(8ch) = 128-bit 저장
-//
-//   출력:
-//     s_cnt, pair_cnt, wbase : datapath 주소 생성용
-//     comp_v    : COMPUTE 중 매 cycle
-//     s_first   : s_cnt == 0 (acc clear)
-//     s_last    : s_cnt == 287 (acc last → logit valid)
-//     pair_done : s_last 와 동일 (argmax 에 pair 완료 통지)
-//
-//   Pipeline depth: BRAM 2 + pe 2 + adder 4 + acc 1 = 9
-//   DRAIN: 9 cycle
+//   Operation:
+//     5 output pairs are processed sequentially.
+//     Each pair scans 144 spatial addresses.
+//     Total compute issue cycles = 5 * 144 = 720.
 //////////////////////////////////////////////////////////////////////////////////
 
 module fc_fsm (
@@ -34,15 +22,15 @@ module fc_fsm (
     input  wire        rst,
     input  wire        start,
 
-    // Handshake
+    // Handshake with previous ping-pong buffer
     input  wire        prior_wdone,
     output reg         rdone,
     output reg         input_bank_sel,
 
-    // Datapath
-    output reg  [8:0]  s_cnt,
-    output reg  [2:0]  pair_cnt,
-    output reg  [10:0] wbase,      // pair_cnt * 288 (누산)
+    // Datapath counters
+    output reg  [7:0]  s_cnt,       // 0..143
+    output reg  [2:0]  pair_cnt,    // 0..4
+    output reg  [9:0]  wbase,       // pair_cnt * 144
 
     output reg         comp_v,
     output reg         s_first,
@@ -56,8 +44,12 @@ module fc_fsm (
     localparam [1:0] DRAIN   = 2'd2;
     localparam [1:0] DONE    = 2'd3;
 
-    // Pipeline depth: BRAM 2 + pe_cell 2 + adder 4 + acc 1 = 9
-    localparam [3:0] DRAIN_MAX = 4'd9;
+    localparam [7:0] SPATIAL_LAST = 8'd143;
+    localparam [9:0] WBASE_STEP   = 10'd144;
+
+    // Datapath latency drain margin.
+    // Engine aligns control internally; this just keeps busy long enough after last issue.
+    localparam [3:0] DRAIN_MAX = 4'd8;
 
     reg [1:0] state;
     reg [3:0] drain_cnt;
@@ -66,60 +58,66 @@ module fc_fsm (
     wire data_ready = (prior_diff < 3'sd0);
 
     //==========================================================================
-    // State + counter
+    // State + counters
     //==========================================================================
     always @(posedge clk) begin
         if (rst) begin
             state     <= IDLE;
-            s_cnt     <= 9'd0;
+            s_cnt     <= 8'd0;
             pair_cnt  <= 3'd0;
-            wbase     <= 11'd0;
+            wbase     <= 10'd0;
             drain_cnt <= 4'd0;
         end else begin
             case (state)
                 IDLE: begin
-                    s_cnt    <= 9'd0;
-                    pair_cnt <= 3'd0;
-                    wbase    <= 11'd0;
+                    s_cnt     <= 8'd0;
+                    pair_cnt  <= 3'd0;
+                    wbase     <= 10'd0;
+                    drain_cnt <= 4'd0;
                     if (start && data_ready)
                         state <= COMPUTE;
                 end
 
                 COMPUTE: begin
-                    if (s_cnt == 9'd287) begin
-                        s_cnt <= 9'd0;
+                    if (s_cnt == SPATIAL_LAST) begin
+                        s_cnt <= 8'd0;
+
                         if (pair_cnt == 3'd4) begin
-                            // 마지막 pair 완료 → DRAIN
                             pair_cnt  <= 3'd0;
-                            wbase     <= 11'd0;
-                            state     <= DRAIN;
+                            wbase     <= 10'd0;
                             drain_cnt <= 4'd0;
+                            state     <= DRAIN;
                         end else begin
                             pair_cnt <= pair_cnt + 3'd1;
-                            wbase    <= wbase + 11'd288;
+                            wbase    <= wbase + WBASE_STEP;
                         end
                     end else begin
-                        s_cnt <= s_cnt + 9'd1;
+                        s_cnt <= s_cnt + 8'd1;
                     end
                 end
 
                 DRAIN: begin
                     if (drain_cnt == DRAIN_MAX - 4'd1) begin
-                        state     <= DONE;
                         drain_cnt <= 4'd0;
+                        state     <= DONE;
                     end else begin
                         drain_cnt <= drain_cnt + 4'd1;
                     end
                 end
 
-                DONE:    state <= IDLE;
-                default: state <= IDLE;
+                DONE: begin
+                    state <= IDLE;
+                end
+
+                default: begin
+                    state <= IDLE;
+                end
             endcase
         end
     end
 
     //==========================================================================
-    // Datapath strobes (combinational)
+    // Datapath strobes
     //==========================================================================
     always @(*) begin
         comp_v  = 1'b0;
@@ -129,23 +127,25 @@ module fc_fsm (
 
         if (state == COMPUTE) begin
             comp_v  = 1'b1;
-            s_first = (s_cnt == 9'd0);
-            s_last  = (s_cnt == 9'd287);
+            s_first = (s_cnt == 8'd0);
+            s_last  = (s_cnt == SPATIAL_LAST);
         end
     end
 
     //==========================================================================
-    // rdone: 마지막 pair 마지막 spatial issue 직후
+    // rdone: one pulse when the last input bank has been consumed.
     //==========================================================================
     always @(posedge clk) begin
         if (rst)
             rdone <= 1'b0;
         else
-            rdone <= (state == COMPUTE) && (pair_cnt == 3'd4) && (s_cnt == 9'd287);
+            rdone <= (state == COMPUTE) && (pair_cnt == 3'd4) && (s_cnt == SPATIAL_LAST);
     end
 
     //==========================================================================
-    // Handshake + bank toggle
+    // Handshake counter + bank toggle
+    // prior_wdone increments available written banks.
+    // rdone consumes one readable bank.
     //==========================================================================
     always @(posedge clk) begin
         if (rst)

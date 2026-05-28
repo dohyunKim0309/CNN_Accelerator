@@ -15,7 +15,7 @@
 //   저장 형식: 채널 순 676개씩 → 총 8×676 = 5408줄 (hex)
 //////////////////////////////////////////////////////////////////////////////////
 
-`define CONV1_INPUT_HEX   "conv1_input.hex"
+`define CONV1_INPUT_HEX   "input_image.mem"
 `define CONV1_WEIGHT_HEX  "conv1_weight.mem"
 
 module tb_conv1_engine;
@@ -113,8 +113,7 @@ module tb_conv1_engine;
         .clkb   (clk),
         .enb    (w_enb),
         .addrb  (w_addrb),
-        .doutb  (w_doutb),
-        .regceb (1'b1)
+        .doutb  (w_doutb)
     );
 
     // 64-bit × 2048, SDP, byte-write wea[7:0], L=2

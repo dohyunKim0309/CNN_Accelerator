@@ -17,16 +17,20 @@
 //     compare_process    : @posedge maxpool.wdone → compare poolfc bank (i&1) → pulse maxpool.succ_rdone
 //
 //   Handshake wiring (4-way, 직접 wire 가능한 부분):
-//     conv2.wdone   → maxpool.prior_wdone   (direct wire — conv2 가 image write 완료 알림)
-//     maxpool.rdone → conv2.succ_rdone      (direct wire — maxpool 이 c2pool read 완료 알림)
-//     conv1.done    → TB pulse → conv2.prior_wdone   (conv1 은 4-way 없으므로 TB 가 변환)
-//     maxpool.wdone → TB wait → compare → maxpool.succ_rdone   (가상 FC 역할)
+//     conv1.wdone   → conv2.prior_wdone     (direct wire — c1c2 write 완료 알림)
+//     conv2.rdone   → conv1.succ_rdone      (direct wire — c1c2 read 완료 알림)
+//     conv2.wdone   → maxpool.prior_wdone   (direct wire — c2pool write 완료 알림)
+//     maxpool.rdone → conv2.succ_rdone      (direct wire — c2pool read 완료 알림)
+//     conv1.prior_wdone : TB pulses per image (input image ready 신호)
+//     maxpool.wdone → TB wait → compare → maxpool.succ_rdone (가상 FC 역할)
 //
-//   ping-pong bank:
-//     conv1: input_bank_sel = bank_sel = i & 1 (TB driving)
-//     conv2: 자동 (fsm_input_bank_sel, fsm_output_bank_sel)
-//     c2pool read bank: maxpool_rdone_count[0] (TB 가 BMG addrb prepend)
-//     poolfc write bank: maxpool_wdone_count[0] (TB 가 driving maxpool.poolfc_bank_sel)
+//   ping-pong bank (모두 race-free):
+//     conv1 input/output bank = conv1 내부 toggle FF (옵션 B 적용 후 RTL 측에서 관리)
+//     conv2 자체 bank         = 자동 (fsm_input_bank_sel, fsm_output_bank_sel — 내부 counter)
+//     c2pool read bank        = maxpool_rdone_count[0] (TB 가 BMG addrb prepend)
+//     poolfc write bank       = maxpool_wdone_count[0] (TB 가 driving maxpool.poolfc_bank_sel)
+//     bram_input write bank   = write_input task 내부 local `bank = img_idx[0]`
+//                               (conv1 의 input_bank_sel reset 후 0 부터 1씩 toggle 과 sync)
 //
 //   필요한 BMG IP:
 //     bram_input, conv1_weight_bram, bram_c1_to_c2, conv2_weight_bram, bram_c2_to_pool
@@ -43,12 +47,10 @@ module tb_conv1_conv2_maxpool_multi;
     parameter N_IMAGES = 40;
 
     //==========================================================================
-    // Clock / reset (100 MHz)
-    //   Conv1 = active-low rst_n, Conv2/Maxpool = active-high rst
+    // Clock / reset (100 MHz, all-DUT active-high rst 통일)
     //==========================================================================
     reg clk = 1'b0;
-    reg rst_n = 1'b0;
-    wire rst = ~rst_n;
+    reg rst = 1'b1;       // active-high, initial asserted
     always #5 clk = ~clk;
 
     //==========================================================================
@@ -60,15 +62,16 @@ module tb_conv1_conv2_maxpool_multi;
     wire         conv1_done;
     wire         maxpool_done;                   // legacy
 
-    // Direct-wire handshake signals
+    // Direct-wire handshake signals (conv1→conv2→maxpool chain)
+    wire         conv1_rdone, conv1_wdone;
     wire         conv2_rdone, conv2_wdone;
     wire         maxpool_rdone, maxpool_wdone;
-    reg          conv2_prior_wdone   = 1'b0;     // TB pulses (from conv1.done)
+    reg          conv1_prior_wdone   = 1'b0;     // TB pulses per image (Conv1 trigger)
     reg          maxpool_succ_rdone  = 1'b0;     // TB pulses (after compare, 가상 FC)
 
-    // ping-pong bank for conv1 측 (TB driving)
-    reg          input_bank_sel = 1'b0;
-    reg          bank_sel       = 1'b0;          // conv1 c1c2 write bank
+    // ping-pong bank for conv1 측 — 이제 conv1 내부 toggle FF (옵션 B) 로 관리.
+    //   conv1_engine_2.v 가 rdone / wdone 에 자체 토글하므로 TB driving 불필요.
+    //   bram_input write bank 는 write_input 내부에서 local `bank = img_idx[0]` 사용.
 
     //==========================================================================
     // BMG signal nets
@@ -120,18 +123,24 @@ module tb_conv1_conv2_maxpool_multi;
     wire         poolfc_bank_sel;              // = wdone_count[0]
 
     //==========================================================================
-    // Counters (handshake-tracked, used for ping-pong bank derivation)
+    // Counters (handshake-tracked, used for ping-pong bank derivation + backpressure)
     //==========================================================================
-    integer conv2_rdone_count    = 0;          // conv1 dispatcher backpressure
+    integer conv1_rdone_count    = 0;          // dispatcher backpressure (옵션 B 후 bank derive 용도 제거)
+    integer conv1_wdone_count    = 0;          // 통계/debug 용 — 옵션 B 후 bank derive 미사용
+    integer conv2_rdone_count    = 0;
     integer maxpool_rdone_count  = 0;          // c2pool read bank
     integer maxpool_wdone_count  = 0;          // poolfc write bank
 
     always @(posedge clk) begin
-        if (!rst_n) begin
+        if (rst) begin
+            conv1_rdone_count    <= 0;
+            conv1_wdone_count    <= 0;
             conv2_rdone_count    <= 0;
             maxpool_rdone_count  <= 0;
             maxpool_wdone_count  <= 0;
         end else begin
+            if (conv1_rdone)   conv1_rdone_count   <= conv1_rdone_count   + 1;
+            if (conv1_wdone)   conv1_wdone_count   <= conv1_wdone_count   + 1;
             if (conv2_rdone)   conv2_rdone_count   <= conv2_rdone_count   + 1;
             if (maxpool_rdone) maxpool_rdone_count <= maxpool_rdone_count + 1;
             if (maxpool_wdone) maxpool_wdone_count <= maxpool_wdone_count + 1;
@@ -139,10 +148,14 @@ module tb_conv1_conv2_maxpool_multi;
     end
 
     //==========================================================================
-    // Bank derivation (TB driving)
+    // Bank derivation (TB driving — c2pool / poolfc 만)
     //==========================================================================
-    wire c2pool_read_bank = maxpool_rdone_count[0];
-    assign poolfc_bank_sel = maxpool_wdone_count[0];
+    //   conv1 의 input_bank_sel / bank_sel 은 옵션 B 적용 후 conv1 내부 register 로
+    //   이동되어 TB 가 driving 하지 않는다.
+    //   conv2 는 원래부터 내부 fsm_input_bank_sel / fsm_output_bank_sel 사용.
+    //   c2pool / poolfc 는 maxpool 이 외부 input_bank_sel 패턴이라 TB 가 derive.
+    wire   c2pool_read_bank = maxpool_rdone_count[0];
+    assign poolfc_bank_sel  = maxpool_wdone_count[0];
 
     //==========================================================================
     // BMG IP instances
@@ -178,35 +191,43 @@ module tb_conv1_conv2_maxpool_multi;
     );
 
     //==========================================================================
-    // DUT 1: Conv1
+    // DUT 1: Conv1 (active-high rst, 4-way handshake)
+    //   prior_wdone : TB pulse per image (image-by-image trigger)
+    //   succ_rdone  : conv2.rdone direct wire (c1c2 read 완료 알림)
+    //   rdone       : conv1.rdone (input read 완료) — TB monitors for backpressure
+    //   wdone       : conv1.wdone → conv2.prior_wdone direct wire (NO TB bridge)
     //==========================================================================
     conv1_engine conv1 (
-        .clk          (clk),
-        .rst_n        (rst_n),
-        .start        (conv1_start),
-        .done         (conv1_done),
+        .clk            (clk),
+        .rst            (rst),                   // active-high
+        .start          (conv1_start),           // legacy, 사용 X
+        .done           (conv1_done),
 
-        .input_bank_sel (input_bank_sel),
-        .bank_sel     (bank_sel),
+        .prior_wdone    (conv1_prior_wdone),
+        .succ_rdone     (conv2_rdone),           // direct wire
+        .rdone          (conv1_rdone),
+        .wdone          (conv1_wdone),
 
-        .in_bram_addr (in_addrb),
-        .in_bram_en   (in_enb),
-        .in_bram_dout (in_doutb),
+        // input_bank_sel / bank_sel 은 conv1 내부 toggle FF (옵션 B) — port 제거됨
 
-        .w_bram_addr  (w1_addrb),
-        .w_bram_en    (w1_enb),
-        .w_bram_dout  (w1_doutb),
+        .in_bram_addr   (in_addrb),
+        .in_bram_en     (in_enb),
+        .in_bram_dout   (in_doutb),
 
-        .c1c2_we      (c1c2_we_a),
-        .c1c2_wea     (c1c2_wea_a),
-        .c1c2_addr    (c1c2_addr_a),
-        .c1c2_din     (c1c2_din_a)
+        .w_bram_addr    (w1_addrb),
+        .w_bram_en      (w1_enb),
+        .w_bram_dout    (w1_doutb),
+
+        .c1c2_we        (c1c2_we_a),
+        .c1c2_wea       (c1c2_wea_a),
+        .c1c2_addr      (c1c2_addr_a),
+        .c1c2_din       (c1c2_din_a)
     );
 
     //==========================================================================
     // DUT 2: Conv2
-    //   prior_wdone : TB pulse (from conv1 done)
-    //   succ_rdone  : maxpool.rdone (direct wire)
+    //   prior_wdone : conv1.wdone direct wire (NO TB bridge)
+    //   succ_rdone  : maxpool.rdone direct wire
     //==========================================================================
     conv2_engine conv2 (
         .clk         (clk),
@@ -225,9 +246,9 @@ module tb_conv1_conv2_maxpool_multi;
         .c2pool_addr (c2pool_addr_a),
         .c2pool_din  (c2pool_din_a),
 
-        .prior_wdone (conv2_prior_wdone),
+        .prior_wdone (conv1_wdone),               // direct wire from conv1
         .rdone       (conv2_rdone),
-        .succ_rdone  (maxpool_rdone),            // direct wire
+        .succ_rdone  (maxpool_rdone),             // direct wire from maxpool
         .wdone       (conv2_wdone)
     );
 
@@ -286,7 +307,7 @@ module tb_conv1_conv2_maxpool_multi;
     integer cycle_at_wdone     [0:N_IMAGES-1];
     integer cycle_at_start_pulse = 0;
 
-    always @(posedge clk) if (rst_n) cycle_cnt <= cycle_cnt + 1;
+    always @(posedge clk) if (!rst) cycle_cnt <= cycle_cnt + 1;
 
     //==========================================================================
     // Tasks
@@ -338,17 +359,10 @@ module tb_conv1_conv2_maxpool_multi;
         end
     endtask
 
-    task pulse_conv1_start;
+    task pulse_conv1_prior_wdone;
         begin
-            @(negedge clk); conv1_start = 1'b1;
-            @(negedge clk); conv1_start = 1'b0;
-        end
-    endtask
-
-    task pulse_conv2_prior_wdone;
-        begin
-            @(negedge clk); conv2_prior_wdone = 1'b1;
-            @(negedge clk); conv2_prior_wdone = 1'b0;
+            @(negedge clk); conv1_prior_wdone = 1'b1;
+            @(negedge clk); conv1_prior_wdone = 1'b0;
         end
     endtask
 
@@ -433,10 +447,10 @@ module tb_conv1_conv2_maxpool_multi;
             cycle_at_wdone[i_main]     = 0;
         end
 
-        // Reset
-        rst_n = 1'b0;
+        // Reset (active-high, initial asserted)
+        rst = 1'b1;
         repeat (10) @(posedge clk);
-        @(negedge clk); rst_n = 1'b1;
+        @(negedge clk); rst = 1'b0;
         $display("[TB] @ cycle %0d : reset released", cycle_cnt);
 
         // Init weights
@@ -475,7 +489,9 @@ module tb_conv1_conv2_maxpool_multi;
 
     //==========================================================================
     // PROCESS 2: Conv1 dispatcher
-    //   per-image input write + bank toggle + conv1_start → conv1.done → TB pulse conv2.prior_wdone
+    //   per-image input write + bank toggle + pulse conv1.prior_wdone
+    //   conv1.wdone → conv2.prior_wdone (direct wire, NO TB bridge)
+    //   conv2.rdone → conv1.succ_rdone (direct wire)
     //==========================================================================
     integer i_conv1;
     initial begin : conv1_dispatcher
@@ -483,27 +499,17 @@ module tb_conv1_conv2_maxpool_multi;
         @(negedge clk);
 
         for (i_conv1 = 0; i_conv1 < N_IMAGES; i_conv1 = i_conv1 + 1) begin
-            // Backpressure: c1c2 ping-pong 2-bank → conv2 처리 1개 뒤까지만 허용
-            wait ((i_conv1 - conv2_rdone_count) < 2);
+            // Backpressure: input bram ping-pong 2-bank — conv1 의 image i-2 read 완료 후 i 시작
+            wait ((i_conv1 - conv1_rdone_count) < 2);
 
-            // Set bank for this image
-            @(negedge clk);
-            input_bank_sel = i_conv1[0];
-            bank_sel       = i_conv1[0];
-
-            // Write input to bram_input bank
+            // Write input to bram_input bank (bank = i_conv1[0])
+            //   conv1 내부 toggle FF (옵션 B) 가 reset 후 0 부터 rdone 마다 토글하므로,
+            //   TB 가 i_conv1[0] 으로 write 하면 conv1 의 read bank 와 자동 sync.
             write_input(i_conv1);
 
-            // Conv1 start
+            // Pulse conv1 prior_wdone — image trigger (자동 handshake chain)
             cycle_at_img_start[i_conv1] = cycle_cnt;
-            pulse_conv1_start();
-
-            // Wait Conv1 done
-            @(posedge conv1_done);
-            repeat (3) @(posedge clk);          // BMG settle (c1c2 last write commit)
-
-            // Pulse conv2 prior_wdone (conv1 → conv2 handshake bridge)
-            pulse_conv2_prior_wdone();
+            pulse_conv1_prior_wdone();
         end
     end
 
@@ -512,7 +518,7 @@ module tb_conv1_conv2_maxpool_multi;
     //==========================================================================
     integer i_cmp;
     initial begin : compare_process
-        wait (rst_n == 1'b1);
+        wait (rst == 1'b0);
         @(negedge clk);
 
         for (i_cmp = 0; i_cmp < N_IMAGES; i_cmp = i_cmp + 1) begin
@@ -541,157 +547,6 @@ module tb_conv1_conv2_maxpool_multi;
         #10000000;
         $display("\n[TB] !!! TIMEOUT @ cycle %0d !!!", cycle_cnt);
         $finish;
-    end
-
-    //==========================================================================
-    // DEBUG monitors — bank race / handshake event trace
-    //   Drop these blocks once root cause is fixed.
-    //==========================================================================
-
-    // Additional counter: conv2 wdone count
-    integer conv2_wdone_count = 0;
-    always @(posedge clk) begin
-        if (!rst_n)            conv2_wdone_count <= 0;
-        else if (conv2_wdone)  conv2_wdone_count <= conv2_wdone_count + 1;
-    end
-
-    // (1) Handshake events
-    always @(posedge clk) begin
-        if (rst_n) begin
-            if (conv2_wdone)
-                $display("[DBG H] cyc=%0d : conv2.wdone   → maxpool.prior_wdone (conv2_wdone count→%0d)",
-                         cycle_cnt, conv2_wdone_count + 1);
-            if (maxpool_rdone)
-                $display("[DBG H] cyc=%0d : maxpool.rdone → conv2.succ_rdone   (maxpool_rdone count→%0d)",
-                         cycle_cnt, maxpool_rdone_count + 1);
-            if (maxpool_wdone)
-                $display("[DBG H] cyc=%0d : maxpool.wdone                       (maxpool_wdone count→%0d)",
-                         cycle_cnt, maxpool_wdone_count + 1);
-            if (conv2_prior_wdone)
-                $display("[DBG H] cyc=%0d : conv2.prior_wdone pulsed (from TB)", cycle_cnt);
-            if (maxpool_succ_rdone)
-                $display("[DBG H] cyc=%0d : maxpool.succ_rdone pulsed (from TB)", cycle_cnt);
-        end
-    end
-
-    // (2) c2pool first write per image (한 image 의 첫 write 만 print)
-    //     이전 write 의 bank 와 다른 bank 의 write 시 첫 write 로 간주
-    reg  [10:0] prev_wr_addr = 11'h7FF;          // 이전 write addr
-    integer wr_count_in_image = 0;
-    always @(posedge clk) begin
-        if (rst_n && c2pool_we_a) begin
-            if (c2pool_addr_a[10] != prev_wr_addr[10] || c2pool_addr_a[9:0] == 10'd0) begin
-                // bank 바뀜 또는 local 0 → 새 image 시작
-                $display("[DBG WR] cyc=%0d : NEW IMG c2pool write start, bank=%b local=%h",
-                         cycle_cnt, c2pool_addr_a[10], c2pool_addr_a[9:0]);
-                wr_count_in_image <= 1;
-            end else begin
-                wr_count_in_image <= wr_count_in_image + 1;
-            end
-            prev_wr_addr <= c2pool_addr_a;
-        end
-    end
-
-    // (3) c2pool first read per image (read_bank 변화 시 print)
-    reg c2pool_read_bank_prev = 1'b0;
-    integer rd_count_in_image = 0;
-    always @(posedge clk) begin
-        c2pool_read_bank_prev <= c2pool_read_bank;
-        if (rst_n && c2pool_re_b) begin
-            if (c2pool_read_bank != c2pool_read_bank_prev) begin
-                $display("[DBG RD] cyc=%0d : NEW IMG c2pool read start, bank=%b (rdone_count=%0d)",
-                         cycle_cnt, c2pool_read_bank, maxpool_rdone_count);
-                rd_count_in_image <= 1;
-            end else begin
-                rd_count_in_image <= rd_count_in_image + 1;
-            end
-        end
-    end
-
-    // (3b) Periodic snapshot: 매 200 cycle 마다 write/read 진행도 print
-    integer snap_cycle = 0;
-    always @(posedge clk) begin
-        if (rst_n) begin
-            snap_cycle <= snap_cycle + 1;
-            if (snap_cycle >= 200) begin
-                snap_cycle <= 0;
-                $display("[DBG SNAP] cyc=%0d : wr_in_img=%0d (bank=%b local=%h), rd_in_img=%0d (bank=%b local=%h)",
-                         cycle_cnt,
-                         wr_count_in_image, c2pool_addr_a[10], c2pool_addr_a[9:0],
-                         rd_count_in_image, c2pool_read_bank, maxpool_c2pool_rd_addr);
-            end
-        end
-    end
-
-    // (4) Maxpool RUN entry detection — first cycle that c2pool_rd_addr 가 변할 때
-    reg [9:0] maxpool_rd_addr_prev = 10'd0;
-    always @(posedge clk) maxpool_rd_addr_prev <= maxpool_c2pool_rd_addr;
-
-    // (5) Bank consistency check at the moment of conv2 wdone
-    always @(posedge clk) begin
-        if (rst_n && conv2_wdone) begin
-            $display("[DBG B] cyc=%0d : conv2.wdone — write_bank just done = %b (output_bank_sel), maxpool will read bank=%b",
-                     cycle_cnt, c2pool_addr_a[10], c2pool_read_bank);
-        end
-    end
-
-    // (6) Last c2pool write before conv2.wdone — 정확한 마지막 write addr 확인
-    reg [10:0] last_c2pool_wr_addr = 11'd0;
-    integer    last_c2pool_wr_cyc = 0;
-    always @(posedge clk) begin
-        if (rst_n && c2pool_we_a) begin
-            last_c2pool_wr_addr <= c2pool_addr_a;
-            last_c2pool_wr_cyc  <= cycle_cnt;
-        end
-        if (rst_n && conv2_wdone) begin
-            $display("[DBG LW] cyc=%0d : conv2.wdone — last c2pool write was @ cyc=%0d addr=%h (bank=%b local=%h)",
-                     cycle_cnt, last_c2pool_wr_cyc, last_c2pool_wr_addr,
-                     last_c2pool_wr_addr[10], last_c2pool_wr_addr[9:0]);
-        end
-    end
-
-    // (7) Maxpool RUN entry — IDLE→RUN transition 정확 시점 + 모든 state 값
-    reg maxpool_was_idle = 1'b1;
-    wire maxpool_in_run = (maxpool.fsm.state == 2'd1);  // RUN = 2'd1
-    always @(posedge clk) begin
-        if (rst_n && maxpool_in_run && maxpool_was_idle) begin
-            $display("[DBG MX] cyc=%0d : maxpool IDLE→RUN | prior_diff=%0d prior_next=%0d after_diff=%0d after_next=%0d data_rdy=%b out_avail=%b",
-                     cycle_cnt,
-                     $signed(maxpool.fsm.prior_diff), $signed(maxpool.fsm.prior_diff_next),
-                     $signed(maxpool.fsm.after_diff), $signed(maxpool.fsm.after_diff_next),
-                     maxpool.fsm.data_ready, maxpool.fsm.output_avail);
-        end
-        if (rst_n) maxpool_was_idle <= (maxpool.fsm.state == 2'd0);  // IDLE = 2'd0
-    end
-
-    // (8) Maxpool first c2pool read — addr + dout 정확 시점 (RUN 진입 후 첫 read)
-    reg c2pool_re_b_prev = 1'b0;
-    always @(posedge clk) c2pool_re_b_prev <= c2pool_re_b;
-
-    reg maxpool_first_read_done = 1'b0;
-    reg [10:0] expected_first_read_addr = 11'd0;
-    integer first_read_cyc = 0;
-    always @(posedge clk) begin
-        if (rst_n && c2pool_re_b && !c2pool_re_b_prev && !maxpool_first_read_done) begin
-            expected_first_read_addr <= {c2pool_read_bank, maxpool_c2pool_rd_addr};
-            first_read_cyc            <= cycle_cnt;
-            $display("[DBG FR] cyc=%0d : maxpool first read after RUN | addr={%b,%h}",
-                     cycle_cnt, c2pool_read_bank, maxpool_c2pool_rd_addr);
-            maxpool_first_read_done <= 1'b1;
-        end
-    end
-
-    // (9) Maxpool first read dout — BMG L=1, dout 1 cycle 후
-    integer first_read_dout_cyc = 0;
-    reg first_dout_captured = 1'b0;
-    always @(posedge clk) begin
-        if (rst_n && maxpool_first_read_done && !first_dout_captured) begin
-            if (cycle_cnt == first_read_cyc + 1) begin
-                $display("[DBG FD] cyc=%0d : maxpool first read dout = %h (low 32b)",
-                         cycle_cnt, c2pool_doutb_b[31:0]);
-                first_dout_captured <= 1'b1;
-            end
-        end
     end
 
 endmodule

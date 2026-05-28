@@ -46,11 +46,36 @@ module maxpool_fsm (
     reg start_d;
     wire start_pulse = start & ~start_d;
 
-    // handshake counters (P1-2, conv2_fsm 패턴)
+    // handshake counters (P1-2, conv2_fsm 패턴 + race fix)
+    //
+    // Race-free design (P1 race fix):
+    //   prior_diff / after_diff 는 register (NBA). DONE→IDLE 진입 cycle 에 rdone 가
+    //   register 출력으로 high 가 되지만 prior_diff 의 NBA update 는 한 cycle 늦음.
+    //   같은 cycle 에 IDLE 의 data_ready check 가 stale prior_diff 를 보고 잘못 RUN 진입.
+    //
+    //   해결: data_ready / output_avail 을 *next* 값 기준으로 combinational 평가.
+    //         그러면 NBA timing 과 무관하게 결정 cycle 의 신호 (rdone/wdone/prior_wdone/succ_rdone)
+    //         반영된 후의 counter 값을 보고 RUN 결정.
     reg signed [2:0] prior_diff;
     reg signed [2:0] after_diff;
-    wire data_ready   = (prior_diff < 3'sd0);
-    wire output_avail = (after_diff < 3'sd2);
+
+    reg signed [2:0] prior_diff_next;
+    reg signed [2:0] after_diff_next;
+    always @(*) begin
+        case ({rdone, prior_wdone})
+            2'b10:   prior_diff_next = prior_diff + 3'sd1;
+            2'b01:   prior_diff_next = prior_diff - 3'sd1;
+            default: prior_diff_next = prior_diff;
+        endcase
+        case ({wdone, succ_rdone})
+            2'b10:   after_diff_next = after_diff + 3'sd1;
+            2'b01:   after_diff_next = after_diff - 3'sd1;
+            default: after_diff_next = after_diff;
+        endcase
+    end
+
+    wire data_ready   = (prior_diff_next < 3'sd0);
+    wire output_avail = (after_diff_next < 3'sd2);
 
     wire [4:0] in_row = out_row << 1;
     wire [4:0] in_col = out_col << 1;
@@ -96,9 +121,9 @@ module maxpool_fsm (
                     flush_cnt <= 3'd0;
 
                     // RUN 진입 조건: 입력 image 준비 + 출력 bank 여유.
-                    //   data_ready: prior_wdone 1개 이상 pulse 받음 (input bank valid)
-                    //   output_avail: after_diff < 2 (poolfc 두 bank 모두 차지 않음)
-                    //   start_pulse 는 system init 시 첫 image 강제 진입용 (legacy)
+                    //   data_ready   = (prior_diff_next < 0) — 다음 cycle 의 prior_diff 값 기준
+                    //   output_avail = (after_diff_next < 2)
+                    //   start_pulse  = system init 시 첫 image 강제 진입용 (legacy)
                     if ((data_ready && output_avail) || start_pulse) begin
                         state <= RUN;
                     end

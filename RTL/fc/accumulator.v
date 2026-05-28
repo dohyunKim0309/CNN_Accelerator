@@ -14,6 +14,13 @@
 //     acc + sum 의 최종값을 logit0/1 에 동시에 latch하고
 //     logit_valid 도 같은 edge 에서 1로 세팅.
 //     (상위에서는 logit_valid=1 인 cycle 에 logit0/1 을 캡처하면 됨)
+//
+//   마지막 spatial (sp143) 처리:
+//     acc_last 가 fire 하는 cycle 에 sum0 = sp143 의 adder 결과이고
+//     acc0_OLD 에는 sp0..sp142 만 누적된 상태. 이 cycle 에 acc0 += sp143 이
+//     일어나지만, logit0 는 non-blocking 으로 acc0_OLD 만 캡처 → sp143 누락.
+//     해결: logit0 <= acc0 + sum0 (combinational add) 로 sp143 contribution
+//     직접 포함. acc0 update 와 동일한 식이라 자원 부담 없음.
 //////////////////////////////////////////////////////////////////////////////////
 
 module fc_accumulator #(
@@ -55,16 +62,17 @@ module fc_accumulator #(
                     acc1 <= acc1 + $signed(sum1);
                 end
 
-                // last: acc0/acc1 이 이미 모든 partial sum 을 포함하고 있음.
-                // (pair 0~3: last 사이클에 sum=0이므로 acc가 정확,
-                //  pair 4  : adder_en=0이라 sum이 hold되어 있으므로 acc만 사용)
+                // last: 이 cycle 의 sum 이 마지막 spatial (sp143) 의 결과.
+                // acc0 는 sp0..sp142 만 누적된 상태이므로 sum0 까지 더해야 완전.
+                // → logit0 <= acc0 + sum0 (acc0 update 와 동일 식, 자원 공유).
                 if (last) begin
                     if (clear) begin
+                        // pair 1 sample 만 있는 경우 (현재 144-spatial 구조에서는 안 일어남)
                         logit0 <= $signed(sum0);
                         logit1 <= $signed(sum1);
                     end else begin
-                        logit0 <= acc0;
-                        logit1 <= acc1;
+                        logit0 <= acc0 + $signed(sum0);
+                        logit1 <= acc1 + $signed(sum1);
                     end
                     logit_valid <= 1'b1;
                 end

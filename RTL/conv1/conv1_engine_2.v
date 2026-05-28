@@ -13,30 +13,28 @@ module conv1_engine (
     input  wire        start,
     output wire        done,
 
-    // 입력 BRAM (읽기)
+    // ping-pong bank select (외부에서 image 별 토글)
+    input  wire        bank_sel,
+
+    // 입력 BRAM (Read, Port B of conv1_input_bram)
     output wire [9:0]        in_bram_addr,
     output wire              in_bram_en,
     input  wire signed [7:0] in_bram_dout,
 
-    // weight BRAM (읽기)
+    // Weight BRAM (Read, Port B of conv1_weight_bram)
     output wire [5:0]  w_bram_addr,
     output wire        w_bram_en,
     input  wire [31:0] w_bram_dout,
 
-    // 출력: 8채널 독립 포트 (동시 write)
-    output wire [9:0]        out_addr,      // 공통 주소
-    output wire              out_we,        // 공통 write enable
-
-    output wire signed [7:0] out_din_ch0,   // oc0 (sel=0)
-    output wire signed [7:0] out_din_ch1,   // oc1 (sel=0)
-    output wire signed [7:0] out_din_ch2,   // oc2 (sel=0)
-    output wire signed [7:0] out_din_ch3,   // oc3 (sel=0)
-    output wire signed [7:0] out_din_ch4,   // oc4 (sel=1)
-    output wire signed [7:0] out_din_ch5,   // oc5 (sel=1)
-    output wire signed [7:0] out_din_ch6,   // oc6 (sel=1)
-    output wire signed [7:0] out_din_ch7,   // oc7 (sel=1)
-
-    output wire              out_sel_r      // 어느 라운드 출력인지
+    // c1c2 BMG Port A (Write, byte-write enable, 64-bit)
+    //   Round 0 (sel=0): ch0..3 (= oc0..3) → byte 0..3, wea = 8'b00001111
+    //   Round 1 (sel=1): ch4..7 (= oc4..7) → byte 4..7, wea = 8'b11110000
+    //   같은 addr 에 2 round 모두 write → BMG byte-write 가 8-byte word merge.
+    //   addr 형식: {bank_sel, h[4:0], w[4:0]} padded → bank*1024 + h*32 + w
+    output wire        c1c2_we,         // ENA (= 두 round 모두 1)
+    output wire [7:0]  c1c2_wea,        // round 별 byte mask
+    output wire [10:0] c1c2_addr,       // {bank_sel, h[4:0], w[4:0]}
+    output wire [63:0] c1c2_din         // {ch7, ch6, ch5, ch4, ch3, ch2, ch1, ch0}
 );
 
     //==========================================================================
@@ -237,62 +235,65 @@ module conv1_engine (
     );
 
     //==========================================================================
-    // 9. [완전 재설계] 제어 신호 동기화를 위한 3단 파이프라인 시프트 체인
+    // 9. 제어 신호 동기화를 위한 3단 파이프라인 시프트 체인
+    //   chX_final: tr_outX 의 1 cycle 지연 latch (round 0 용)
+    //   round 1 은 tr_outX 직접 사용 (1 cycle 보정)
     //==========================================================================
-    // 데이터 버스 최종 안정화를 위한 출력 레지스터링
     reg signed [7:0] ch0_final, ch1_final, ch2_final, ch3_final;
-    
-    // FSM 순수 오리지널 신호를 3클럭 동안 똑같이 밀어줄 3비트 시프트 레지스터
+
     reg [2:0] we_pipe;
     reg [2:0] sel_pipe;
-    
-    // 주소 연산 결과를 밀어줄 3단계 주소 배열
+
+    // padded 형식 주소: h*32+w (BMG bank addr 의 하위 10-bit). 26 valid + 6 pad.
     reg [9:0] addr_pipe [0:2];
 
     always @(posedge clk) begin
         if (!rst_n) begin
             ch0_final <= 8'sd0; ch1_final <= 8'sd0;
             ch2_final <= 8'sd0; ch3_final <= 8'sd0;
-            
+
             we_pipe   <= 3'b000;
             sel_pipe  <= 3'b000;
             addr_pipe[0] <= 10'd0; addr_pipe[1] <= 10'd0; addr_pipe[2] <= 10'd0;
         end else begin
-            // 1) [Data Path - T+3] 2클럭 지연되어 도달한 연산 결과를 최종 출력 클럭 에지에 캡처
             ch0_final <= tr_out0;
             ch1_final <= tr_out1;
             ch2_final <= tr_out2;
             ch3_final <= tr_out3;
 
-            // 2) [Control Path - T+3] FSM 제어 신호를 데이터와 100% 동일한 선상에서 오른쪽으로 이동
             we_pipe  <= {we_pipe[1:0],  out_valid};
             sel_pipe <= {sel_pipe[1:0], out_sel};
-            
-            // 주소 연산은 FSM 단계(Stage 0)에서 계산한 후 한 칸씩 파이프라인 이동
-            addr_pipe[0] <= out_row * 10'd26 + {5'd0, out_col};
+
+            // padded h*32+w (multiplier 제거 → shift+concat)
+            addr_pipe[0] <= {out_row[4:0], out_col[4:0]};
             addr_pipe[1] <= addr_pipe[0];
             addr_pipe[2] <= addr_pipe[1];
         end
     end
 
-//==========================================================================
-    // 10. 최종 출력 매핑 (라운드 2 데이터 1클럭 밀림 현상 보정 반영)
     //==========================================================================
-    assign out_addr  = addr_pipe[2]; 
-    assign out_we    = we_pipe[2];   
-    assign out_sel_r = sel_pipe[2];  
+    // 10. c1c2 BMG Port A 결선
+    //
+    //   Round 0 (sel_pipe[2]=0): ch0..3 (oc0..3) → byte 0..3, wea = 8'b00001111
+    //     - ch0..3 데이터는 ch*_final (1 cycle 지연된 latch) 사용
+    //   Round 1 (sel_pipe[2]=1): ch4..7 (oc4..7) → byte 4..7, wea = 8'b11110000
+    //     - ch4..7 데이터는 tr_out0..3 직접 (= 1 cycle 보정: round 2 가 round 1 보다
+    //       1 cycle 늦게 정렬되는 현상 상쇄)
+    //
+    //   같은 addr 에 두 round 모두 write → BMG 의 byte-write 가 8-byte word merge.
+    //
+    //   addr 형식: {bank_sel, addr_pipe[2]} = {bank, h[4:0], w[4:0]}
+    //==========================================================================
+    wire round0_active = (sel_pipe[2] == 1'b0);
 
-    // [Ch 0~3] 라운드 1 데이터: 현재 타이밍이 완벽하므로 그대로 유지
-    assign out_din_ch0 = (sel_pipe[2] == 1'b0) ? ch0_final : 8'sd0;
-    assign out_din_ch1 = (sel_pipe[2] == 1'b0) ? ch1_final : 8'sd0;
-    assign out_din_ch2 = (sel_pipe[2] == 1'b0) ? ch2_final : 8'sd0;
-    assign out_din_ch3 = (sel_pipe[2] == 1'b0) ? ch3_final : 8'sd0;
+    wire [63:0] din_round0 = {32'd0,
+                              ch3_final, ch2_final, ch1_final, ch0_final};
+    wire [63:0] din_round1 = {tr_out3, tr_out2, tr_out1, tr_out0,
+                              32'd0};
 
-    // [Ch 4~7] 라운드 2 데이터 보정:
-    // 하드웨어 데이터(tr_outX)가 레지스터(chX_final)에 담기기 "1클럭 전"인 
-    // 따끈따끈한 연산기 직출력 데이터(tr_outX)를 바로 끌어와서 1클럭 밀림을 상쇄합니다!
-    assign out_din_ch4 = (sel_pipe[2] == 1'b1) ? tr_out0 : 8'sd0;
-    assign out_din_ch5 = (sel_pipe[2] == 1'b1) ? tr_out1 : 8'sd0;
-    assign out_din_ch6 = (sel_pipe[2] == 1'b1) ? tr_out2 : 8'sd0;
-    assign out_din_ch7 = (sel_pipe[2] == 1'b1) ? tr_out3 : 8'sd0;
+    assign c1c2_we   = we_pipe[2];
+    assign c1c2_wea  = round0_active ? 8'b00001111 : 8'b11110000;
+    assign c1c2_addr = {bank_sel, addr_pipe[2]};
+    assign c1c2_din  = round0_active ? din_round0 : din_round1;
+
 endmodule

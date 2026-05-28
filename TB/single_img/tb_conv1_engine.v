@@ -1,140 +1,300 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Testbench: tb_conv1_engine
-// - conv1_weight.mem / input_image.mem 을 $readmemh 로 로드
-// - weight BRAM 모델: latency=2 (Primitive Output Register ON)
-// - input  BRAM 모델: latency=1 (Primitive Output Register OFF)
-// - 출력(8채널 26x26)을 conv1_out.hex 로 저장 → Python 검증에 사용
+// tb_conv1_engine.v
+// Single-image bit-exact testbench for conv1_engine  (uses real BMG IPs)
+//
+//   3 real BMG IP instantiation:
+//     conv1_input_bram   (PS write Port A, Conv1 read Port B)  — 8-bit × 1024, L=2
+//     conv1_weight_bram  (PS write Port A, Conv1 read Port B)  — 32-bit × 64,  L=2, REGCEB pin exposed
+//     bram_c1_to_c2      (Conv1 write Port A, TB read Port B)  — 64-bit × 2048, L=2, byte-write 8-bit
+//
+//   자극 sequence:
+//     reset → init_input() → init_weight() → start pulse → wait done → compare c1c2 BMG bank 0 vs expected
+//
+//   Conv1 동작 (요약):
+//     IDLE → LOAD (weight 적재 ~40 cycle) → RUN1 (28×28 scan, oc0..3, sel=0) → FLUSH1
+//     → LBRST → RUN2 (28×28 scan, oc4..7, sel=1) → FLUSH2 → DONE
+//     done 시 c1c2 BMG bank 0 에 8 OC × 26×26 결과 완성.
 //////////////////////////////////////////////////////////////////////////////////
+
+`define CONV1_INPUT_HEX   "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_input.hex"
+`define CONV1_WEIGHT_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_weights_simd.hex"
+`define CONV1_EXPECTED_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_output_c1c2.hex"
+
 
 module tb_conv1_engine;
 
     //==========================================================================
-    // 1. 클럭 / 리셋
+    // Clock / reset (100 MHz)
     //==========================================================================
-    reg clk = 0;
-    reg rst_n = 0;   // active-low: 0=리셋, 1=정상동작
-    reg start = 0;
-
-    always #5 clk = ~clk;   // 10ns = 100MHz
+    reg clk = 1'b0;
+    reg rst_n = 1'b0;
+    always #5 clk = ~clk;
 
     //==========================================================================
-    // 2. DUT 포트 연결
+    // DUT 시그널
     //==========================================================================
-    wire        done;
+    reg          start    = 1'b0;
+    wire         done;
 
-    wire [9:0]        in_bram_addr;
-    wire              in_bram_en;
-    wire signed [7:0] in_bram_dout;
+    // ping-pong bank (standalone: 항상 0)
+    wire         bank_sel = 1'b0;
 
-    wire [5:0]  w_bram_addr;
-    wire        w_bram_en;
-    wire [31:0] w_bram_dout;
+    // conv1_input_bram interface
+    reg          in_ena   = 1'b0;            // TB driving Port A (init_input)
+    reg          in_wea   = 1'b0;
+    reg  [9:0]   in_addra = 10'd0;
+    reg  [7:0]   in_dina  = 8'd0;
+    wire [9:0]   in_addrb;                   // Conv1 reads Port B
+    wire         in_enb;
+    wire signed [7:0] in_doutb;
 
-    wire [9:0]        out_addr;
-    wire              out_we;
-    wire signed [7:0] out_din_ch0, out_din_ch1, out_din_ch2, out_din_ch3;
-    wire signed [7:0] out_din_ch4, out_din_ch5, out_din_ch6, out_din_ch7;
-    wire              out_sel_r;
+    // conv1_weight_bram interface
+    reg          w_ena    = 1'b0;            // TB driving Port A (init_weight)
+    reg          w_wea    = 1'b0;
+    reg  [5:0]   w_addra  = 6'd0;
+    reg  [31:0]  w_dina   = 32'd0;
+    wire [5:0]   w_addrb;
+    wire         w_enb;
+    wire [31:0]  w_doutb;
 
-    conv1_engine dut (
-        .clk          (clk),          .rst_n        (rst_n),
-        .start        (start),        .done         (done),
-        .in_bram_addr (in_bram_addr), .in_bram_en   (in_bram_en),
-        .in_bram_dout (in_bram_dout),
-        .w_bram_addr  (w_bram_addr),  .w_bram_en    (w_bram_en),
-        .w_bram_dout  (w_bram_dout),
-        .out_addr     (out_addr),     .out_we       (out_we),
-        .out_din_ch0  (out_din_ch0),  .out_din_ch1  (out_din_ch1),
-        .out_din_ch2  (out_din_ch2),  .out_din_ch3  (out_din_ch3),
-        .out_din_ch4  (out_din_ch4),  .out_din_ch5  (out_din_ch5),
-        .out_din_ch6  (out_din_ch6),  .out_din_ch7  (out_din_ch7),
-        .out_sel_r    (out_sel_r)
+    // bram_c1_to_c2 interface
+    wire         c1c2_we_a;                  // Conv1 writes Port A
+    wire [7:0]   c1c2_wea_a;
+    wire [10:0]  c1c2_addr_a;
+    wire [63:0]  c1c2_din_a;
+    reg          c1c2_enb_b   = 1'b0;        // TB reads Port B (verification)
+    reg  [10:0]  c1c2_addr_b  = 11'd0;
+    wire [63:0]  c1c2_doutb_b;
+
+    //==========================================================================
+    // BMG IP 인스턴스 (사용자 측 Vivado 프로젝트에 생성 필요)
+    //==========================================================================
+    conv1_input_bram in_bmg (
+        .clka  (clk),
+        .ena   (in_ena),
+        .wea   (in_wea),
+        .addra (in_addra),
+        .dina  (in_dina),
+        .clkb  (clk),
+        .enb   (in_enb),
+        .addrb (in_addrb),
+        .doutb (in_doutb)
+    );
+
+    conv1_weight_bram w_bmg (
+        .clka  (clk),
+        .ena   (w_ena),
+        .wea   (w_wea),
+        .addra (w_addra),
+        .dina  (w_dina),
+        .clkb  (clk),
+        .enb   (w_enb),
+        .addrb (w_addrb),
+        .doutb (w_doutb),
+        .regceb(1'b1)                        // 상수 1: 마지막 weight propagation 보장
+    );
+
+    bram_c1_to_c2 c1c2_bmg (
+        .clka  (clk),
+        .ena   (c1c2_we_a),
+        .wea   (c1c2_wea_a),
+        .addra (c1c2_addr_a),
+        .dina  (c1c2_din_a),
+        .clkb  (clk),
+        .enb   (c1c2_enb_b),
+        .addrb (c1c2_addr_b),
+        .doutb (c1c2_doutb_b)
     );
 
     //==========================================================================
-    // 3. BRAM 모델 — weight BRAM (latency=2)
+    // DUT
     //==========================================================================
-    reg [31:0] w_mem [0:63];
-    initial $readmemh("conv1_weight.mem", w_mem);
+    conv1_engine dut (
+        .clk          (clk),
+        .rst_n        (rst_n),
+        .start        (start),
+        .done         (done),
 
-    reg [31:0] w_pipe1, w_pipe2;
-    always @(posedge clk) begin
-        w_pipe1 <= w_mem[w_bram_addr];
-        w_pipe2 <= w_pipe1;
-    end
-    assign w_bram_dout = w_pipe2;
+        .bank_sel     (bank_sel),
+
+        .in_bram_addr (in_addrb),
+        .in_bram_en   (in_enb),
+        .in_bram_dout (in_doutb),
+
+        .w_bram_addr  (w_addrb),
+        .w_bram_en    (w_enb),
+        .w_bram_dout  (w_doutb),
+
+        .c1c2_we      (c1c2_we_a),
+        .c1c2_wea     (c1c2_wea_a),
+        .c1c2_addr    (c1c2_addr_a),
+        .c1c2_din     (c1c2_din_a)
+    );
 
     //==========================================================================
-    // 4. BRAM 모델 — input image BRAM (latency=1)
+    // TB-local memory (init 용)
     //==========================================================================
-    reg [7:0] in_mem [0:783];
-    initial $readmemh("input_image.mem", in_mem);
-
-    reg [7:0] in_pipe;
-    always @(posedge clk)
-        in_pipe <= in_mem[in_bram_addr];
-    assign in_bram_dout = $signed(in_pipe);
+    reg [7:0]  input_mem  [0:783];          // 28×28 raw pixels
+    reg [31:0] weight_mem [0:35];           // Conv1 packed weights (36 entry)
+    reg [63:0] expected_c1c2 [0:1023];      // expected c1c2 BMG bank 0 (1024 padded)
 
     //==========================================================================
-    // 5. 출력 캡처 — [channel 0~7][pixel addr 0~675]
+    // Cycle counter
     //==========================================================================
-    reg signed [7:0] out_buf [0:7][0:675];
+    integer cycle_cnt;
+    integer cycle_at_start, cycle_at_done;
 
-    integer init_ch, init_px;
-    initial begin
-        for (init_ch = 0; init_ch < 8; init_ch = init_ch + 1)
-            for (init_px = 0; init_px < 676; init_px = init_px + 1)
-                out_buf[init_ch][init_px] = 8'sd0;
-    end
+    initial cycle_cnt = 0;
+    always @(posedge clk) if (rst_n) cycle_cnt <= cycle_cnt + 1;
 
-    always @(posedge clk) begin
-        if (out_we) begin
-            if (!out_sel_r) begin   // sel=0 라운드: oc0~3
-                out_buf[0][out_addr] <= out_din_ch0;
-                out_buf[1][out_addr] <= out_din_ch1;
-                out_buf[2][out_addr] <= out_din_ch2;
-                out_buf[3][out_addr] <= out_din_ch3;
-            end else begin           // sel=1 라운드: oc4~7
-                out_buf[4][out_addr] <= out_din_ch4;
-                out_buf[5][out_addr] <= out_din_ch5;
-                out_buf[6][out_addr] <= out_din_ch6;
-                out_buf[7][out_addr] <= out_din_ch7;
+    //==========================================================================
+    // Task: init_input — Port A 로 784 cycle 동안 input image write
+    //==========================================================================
+    task init_input;
+        integer ii;
+        begin
+            $display("[TB] @ cycle %0d : init_input start (784 cycle)", cycle_cnt);
+            for (ii = 0; ii < 784; ii = ii + 1) begin
+                @(negedge clk);
+                in_ena   = 1'b1;
+                in_wea   = 1'b1;
+                in_addra = ii[9:0];
+                in_dina  = input_mem[ii];
             end
+            @(negedge clk);
+            in_ena   = 1'b0;
+            in_wea   = 1'b0;
+            $display("[TB] @ cycle %0d : init_input done", cycle_cnt);
         end
-    end
+    endtask
 
     //==========================================================================
-    // 6. done 시 파일 저장
-    //    형식: 채널 순서대로 676개씩 → 총 8*676=5408 줄
+    // Task: init_weight — Port A 로 36 cycle 동안 weight write
     //==========================================================================
-    integer fd, save_ch, save_px;
-    always @(posedge clk) begin
-        if (done) begin
-            fd = $fopen("conv1_out.hex", "w");
-            for (save_ch = 0; save_ch < 8; save_ch = save_ch + 1)
-                for (save_px = 0; save_px < 676; save_px = save_px + 1)
-                    $fwrite(fd, "%02x\n", out_buf[save_ch][save_px] & 8'hFF);
-            $fclose(fd);
-            $display("[TB] done at %0t ns. conv1_out.hex saved.", $time);
-            #20 $finish;
+    task init_weight;
+        integer wi;
+        begin
+            $display("[TB] @ cycle %0d : init_weight start (36 cycle)", cycle_cnt);
+            for (wi = 0; wi < 36; wi = wi + 1) begin
+                @(negedge clk);
+                w_ena   = 1'b1;
+                w_wea   = 1'b1;
+                w_addra = wi[5:0];
+                w_dina  = weight_mem[wi];
+            end
+            @(negedge clk);
+            w_ena   = 1'b0;
+            w_wea   = 1'b0;
+            $display("[TB] @ cycle %0d : init_weight done", cycle_cnt);
         end
-    end
+    endtask
 
     //==========================================================================
-    // 7. 자극 시퀀스
+    // Task: compare_c1c2 — bank 0 read + expected 비교 (L=2 pipelined read)
+    //==========================================================================
+    integer total_mm;
+    task compare_c1c2;
+        integer i;
+        reg [63:0] got, exp;
+        reg [10:0] read_addr;
+        begin
+            total_mm = 0;
+            $display("[TB] Comparing c1c2 BMG bank 0 (1024 entries) vs expected ...");
+            // Pipelined read (L=2): addr@T → dout@T+2
+            for (i = 0; i < 1024 + 2; i = i + 1) begin
+                @(negedge clk);
+                if (i < 1024) begin
+                    c1c2_enb_b  = 1'b1;
+                    c1c2_addr_b = {1'b0, i[9:0]};   // bank 0
+                end else begin
+                    c1c2_enb_b  = 1'b0;
+                end
+
+                if (i >= 2) begin
+                    read_addr = i - 2;
+                    got = c1c2_doutb_b;
+                    exp = expected_c1c2[read_addr];
+                    if (got !== exp) begin
+                        total_mm = total_mm + 1;
+                        if (total_mm <= 10) begin
+                            $display("  MM @ addr %0d : got=%h, exp=%h",
+                                     read_addr, got, exp);
+                        end
+                    end
+                end
+            end
+            @(negedge clk);
+            c1c2_enb_b = 1'b0;
+        end
+    endtask
+
+    //==========================================================================
+    // Main stimulus
     //==========================================================================
     initial begin
-        repeat(5)  @(posedge clk);
-        rst_n = 1;   // 리셋 해제
-        repeat(2)  @(posedge clk);
-        start = 1;
-        @(posedge clk);
-        start = 0;
+        $display("[TB] === Conv1 single-image bit-exact test ===");
+        $display("[TB] Loading input  : %s", `CONV1_INPUT_HEX);
+        $readmemh(`CONV1_INPUT_HEX,    input_mem);
+        $display("[TB] Loading weight : %s", `CONV1_WEIGHT_HEX);
+        $readmemh(`CONV1_WEIGHT_HEX,   weight_mem);
+        $display("[TB] Loading expected: %s", `CONV1_EXPECTED_HEX);
+        $readmemh(`CONV1_EXPECTED_HEX, expected_c1c2);
 
-        // 타임아웃: 가중치 로드(~40) + RUN1(784) + RUN2(784) + flush + 여유
-        repeat(5000) @(posedge clk);
-        $display("[TB] TIMEOUT");
+        // Reset
+        rst_n = 1'b0;
+        repeat (10) @(posedge clk);
+        @(negedge clk);
+        rst_n = 1'b1;
+        $display("[TB] @ cycle %0d : reset released", cycle_cnt);
+
+        // Init BMGs (Port A driving)
+        init_input();
+        init_weight();
+
+        // Start pulse
+        @(negedge clk);
+        start = 1'b1;
+        cycle_at_start = cycle_cnt;
+        @(negedge clk);
+        start = 1'b0;
+        $display("[TB] @ cycle %0d : start pulsed", cycle_at_start);
+
+        // Wait done
+        @(posedge done);
+        cycle_at_done = cycle_cnt;
+        $display("[TB] @ cycle %0d : done received", cycle_at_done);
+
+        // Settle a few cycles for c1c2 BMG mem update
+        repeat (5) @(posedge clk);
+
+        // Compare c1c2 BMG bank 0 vs expected
+        compare_c1c2();
+
+        // Report
+        $display("");
+        $display("================================================");
+        $display("  Conv1 single-image testbench result");
+        $display("================================================");
+        $display("  start       @ cycle %0d", cycle_at_start);
+        $display("  done        @ cycle %0d", cycle_at_done);
+        $display("  compute     : %0d cycles", cycle_at_done - cycle_at_start);
+        $display("  mismatches  : %0d / 1024", total_mm);
+        if (total_mm == 0)
+            $display("  *** PASS *** (bit-exact match)");
+        else
+            $display("  *** FAIL ***");
+        $display("================================================");
+
+        $finish;
+    end
+
+    //==========================================================================
+    // Timeout
+    //==========================================================================
+    initial begin
+        #100000;
+        $display("[TB] !!! TIMEOUT @ cycle %0d !!!", cycle_cnt);
         $finish;
     end
 

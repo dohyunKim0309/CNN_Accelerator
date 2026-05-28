@@ -69,6 +69,8 @@ row2_in = c1c2_dout     row1_in = lb1.dout     row0_in = lb2.dout
 | c2pool BRAM write (edge 에서 mem update) | 1 |
 | **합계 (PE input @ T → c2pool memory updated at edge T+11→T+12)** | **12** |
 
+**Pipelined 모듈의 `en` 게이팅 원칙**: `krow_ic_adder_tree` 는 5 stage 각각이 `en` 으로 게이팅됨. 마지막 valid 입력이 sum register 까지 도달하려면 `en=1` 이 **5 cycle 연속 유지** 되어야 함. `conv2_engine.v` 는 이를 위해 `adder_en = OR(pe_en_pipe[3..7])` 의 5-cycle window 로 정의 (단일 `pe_en_pipe[3]` 만 사용하면 마지막 입력이 s1 에서 stuck → kcol_accumulator 가 stale sum 누적). 상세 분석: **`conv2_adder_drain_bug_fix.md`**.
+
 ### 0.5 FSM (수정 후 — DRAIN 추가, cap 적용)
 
 8 states:

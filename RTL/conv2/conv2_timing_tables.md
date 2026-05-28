@@ -115,6 +115,8 @@ cycle 1796 (DRAIN d=11): **`wdone=1`** (1-cycle pulse). edge 1796→1797: state 
 
 → wdone fire (cycle 1796) 와 state=DONE 진입 (cycle 1797) 은 1 cycle 차이. handshake 가 wdone pulse 기반이라 무해.
 
+**⚠️ Adder pipeline drain 주의**: DRAIN cycle 1785~1792 동안에도 `adder_en` 은 1 로 유지되어야 마지막 valid PE 출력이 `krow_ic_adder_tree` 5-stage 를 통과해 `sum` register 까지 도달함. 단순히 `adder_en = pe_en_pipe[3]` 으로 4-cycle delay 만 적용하면 cycle 1789 부터 en=0 → 마지막 입력이 s1 에서 stuck → `kcol_accumulator` 가 stale sum 누적 → mem[574], mem[575] 오염. `conv2_engine.v` 는 `adder_en = OR(pe_en_pipe[3..7])` 의 5-cycle window 로 수정 적용됨. 상세: **`conv2_adder_drain_bug_fix.md`**.
+
 ---
 
 ## 5. 주요 검증 anchor (testbench 대조용)

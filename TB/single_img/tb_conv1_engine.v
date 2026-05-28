@@ -3,9 +3,9 @@
 // Testbench: tb_conv1_engine  (BMG IP version)
 //
 //   BMG IP 3개 인스턴스:
-//     conv1_input_bram  — 8-bit  × 1024, SDP, L=2 (Port B output register)
-//     conv1_weight_bram — 32-bit × 64,   SDP, L=2 (REGCEB 노출, 항상 1)
-//     bram_c1_to_c2     — 64-bit × 2048, SDP, byte-write wea[7:0], L=2
+//     conv1_input_bram  - 8-bit  × 1024, SDP, L=2 (Port B output register)
+//     conv1_weight_bram - 32-bit × 64,   SDP, L=2
+//     bram_c1_to_c2     - 64-bit × 2048, SDP, byte-write wea[7:0], L=2
 //
 //   c1c2 BRAM 레이아웃 (64-bit per pixel):
 //     [31: 0] = {ch3, ch2, ch1, ch0}  (Round 0, wea=8'b00001111)
@@ -15,8 +15,9 @@
 //   저장 형식: 채널 순 676개씩 → 총 8×676 = 5408줄 (hex)
 //////////////////////////////////////////////////////////////////////////////////
 
-`define CONV1_INPUT_HEX   "input_image.mem"
-`define CONV1_WEIGHT_HEX  "conv1_weight.mem"
+`define CONV1_INPUT_HEX    "input_image.mem"
+`define CONV1_WEIGHT_HEX   "conv1_weight.mem"
+`define CONV1_EXPECTED_HEX "conv1_output_c1c2.hex"
 
 module tb_conv1_engine;
 
@@ -87,7 +88,6 @@ module tb_conv1_engine;
 
     //==========================================================================
     // 4. BMG IP 인스턴스
-    //    ※ Vivado IP 이름 / 포트 이름이 다를 경우 맞춰서 수정
     //==========================================================================
 
     // 8-bit × 1024, SDP, L=2
@@ -103,7 +103,7 @@ module tb_conv1_engine;
         .doutb (in_doutb)
     );
 
-    // 32-bit × 64, SDP, L=2, REGCEB 항상 1
+    // 32-bit × 64, SDP, L=2
     conv1_weight_bram w_bmg (
         .clka   (clk),
         .ena    (w_ena),
@@ -130,16 +130,16 @@ module tb_conv1_engine;
     );
 
     //==========================================================================
-    // 5. 로컬 메모리 (BRAM 초기화 용)
+    // 5. 로컬 메모리
     //==========================================================================
     reg [7:0]  input_mem  [0:783];    // 28×28 입력 이미지
     reg [31:0] weight_mem [0:35];     // conv1 packed weight 36개
+    reg [7:0]  out_buf    [0:7][0:675]; // 출력 결과  [채널][픽셀]
+    reg [7:0]  exp_flat   [0:5407];   // 기대값 (8×676=5408 엔트리, 채널 순)
 
     //==========================================================================
     // 6. BRAM 초기화 태스크
     //==========================================================================
-
-    // conv1_input_bram Port A 를 통해 784픽셀 기록
     task init_input_bram;
         integer i;
         begin
@@ -156,7 +156,6 @@ module tb_conv1_engine;
         end
     endtask
 
-    // conv1_weight_bram Port A 를 통해 36엔트리 기록
     task init_weight_bram;
         integer i;
         begin
@@ -175,17 +174,13 @@ module tb_conv1_engine;
 
     //==========================================================================
     // 7. 결과 저장 태스크
-    //    c1c2 BRAM Port B 로 26×26 전체 읽어서 conv1_out.hex 저장
-    //    레이아웃: word[ch*8 +: 8]  (ch0~3 = [31:0], ch4~7 = [63:32])
     //==========================================================================
-    reg [7:0]  out_buf [0:7][0:675];  // [채널][픽셀]
-    integer    fd, ch, row, col, px;
+    integer fd, ch, row, col, px;
 
     task save_result;
         reg [10:0] addr;
         reg [63:0] word;
         begin
-            // Port B 로 순차 읽기 (L=2 → 2클럭 대기)
             for (row = 0; row < 26; row = row + 1) begin
                 for (col = 0; col < 26; col = col + 1) begin
                     addr       = {1'b0, row[4:0], col[4:0]};
@@ -214,11 +209,44 @@ module tb_conv1_engine;
     endtask
 
     //==========================================================================
-    // 8. 자극 시퀀스
+    // 8. 검증 태스크
+    //    out_buf vs exp_flat 비교
+    //    exp_flat 형식: 채널 순 676개씩 (= conv1_out.hex 와 동일)
+    //==========================================================================
+    integer err_cnt;
+
+    task verify_result;
+        integer exp_val;
+        begin
+            err_cnt = 0;
+
+            for (ch = 0; ch < 8; ch = ch + 1) begin
+                for (px = 0; px < 676; px = px + 1) begin
+                    exp_val = exp_flat[ch * 676 + px];
+                    if (out_buf[ch][px] !== exp_val[7:0]) begin
+                        if (err_cnt < 20)  // 최대 20개만 출력
+                            $display("[MISMATCH] ch=%0d px=%0d (row=%0d col=%0d)  got=0x%02x  exp=0x%02x",
+                                     ch, px, px/26, px%26,
+                                     out_buf[ch][px], exp_val[7:0]);
+                        err_cnt = err_cnt + 1;
+                    end
+                end
+            end
+
+            if (err_cnt == 0)
+                $display("[PASS] All %0d outputs match!", 8*676);
+            else
+                $display("[FAIL] %0d / %0d mismatches", err_cnt, 8*676);
+        end
+    endtask
+
+    //==========================================================================
+    // 9. 자극 시퀀스
     //==========================================================================
     initial begin
-        $readmemh(`CONV1_INPUT_HEX,  input_mem);
-        $readmemh(`CONV1_WEIGHT_HEX, weight_mem);
+        $readmemh(`CONV1_INPUT_HEX,    input_mem);
+        $readmemh(`CONV1_WEIGHT_HEX,   weight_mem);
+        $readmemh(`CONV1_EXPECTED_HEX, exp_flat);
 
         // 리셋
         repeat(5) @(posedge clk);
@@ -240,12 +268,15 @@ module tb_conv1_engine;
         // 결과 저장
         save_result;
 
+        // 검증
+        verify_result;
+
         $display("[TB] done at %0t ns.", $time);
         #20 $finish;
     end
 
     //==========================================================================
-    // 9. 타임아웃
+    // 10. 타임아웃
     //==========================================================================
     initial begin
         repeat(8000) @(posedge clk);

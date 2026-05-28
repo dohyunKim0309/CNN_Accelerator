@@ -1,20 +1,30 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Testbench: tb_fc_engine (수정판)
+// Testbench: tb_fc_engine (2026-05-29 update)
 //
-// 원본 대비 변경사항:
-//   1. poolfc 버퍼: 1-cycle latency로 단순화
-//   2. fc_weight_bram: 256-bit × 720으로 수정, regceb 제거
-//   3. load_weights: 720번 loop, 256-bit씩 write ({odd, even})
-//   4. hex 파일 형식:
-//      - maxpool_output.hex    : 288 lines × 32 hex chars (128-bit per entry)
-//          entry s = {ch15,..,ch0} where ch0=[7:0]
-//          bank0: s=0..143, bank1: s=144..287 (동일 데이터)
-//      - fc1_weight_bram.hex   : 1440 lines × 32 hex chars (128-bit per entry)
-//          entry 2*(pair*144+s)+0 = even OC weights ch0..15
-//          entry 2*(pair*144+s)+1 = odd  OC weights ch0..15
-//          load시 두 entry씩 합쳐 256-bit로 기록
+// 변경사항:
+//   1. hex 경로: project data/ 폴더 기준 (data/single_img/, data/weights_simd/)
+//   2. maxpool_output.hex 포맷: 1 byte/line, channel-major flatten
+//      - shape (16, 12, 12) → byte at line c*144 + s where s = h*12 + w
+//      - TB 가 byte stream 을 spatial-major 128-bit/word 로 재조립
+//   3. fc_weights_simd.hex 포맷: 32-bit/line SIMD-packed (W1*2^17 + W0)
+//      - 11520 lines = 5 pair × 144 spatial × 16 channel
+//      - line index = pair*144*16 + s*16 + c
+//      - TB 가 unpack 하여 (w_even, w_odd) 분리 후 256-bit BMG word 조립
+//   4. fc_engine port 변경 반영:
+//      - poolfc_addr: 10-bit → 9-bit
+//      - fc_weight_bram: ENA + WEA 분리 결선
+//   5. RTL/fc/maxpool_output.hex, fc1_weight_bram.hex (구 포맷) 삭제됨
+//
+// SIMD unpack 식:
+//   W0 (8-bit signed) = packed[7:0]
+//   W1 (8-bit signed) = packed[24:17] + (packed[16] ? 1 : 0)
+//                       ↑ carry correction (negative W0 시)
 //////////////////////////////////////////////////////////////////////////////////
+
+// 경로는 Vivado sim 환경에 맞춰 조정. project root 기준 data/ 폴더.
+`define POOLFC_HEX  "C:/Users/gimdohyeon/PycharmProjects/CNN_Accelerator/data/single_img/maxpool_output.hex"
+`define FCW_HEX     "C:/Users/gimdohyeon/PycharmProjects/CNN_Accelerator/data/weights_simd/fc_weights_simd.hex"
 
 module tb_fc_engine;
 
@@ -53,7 +63,7 @@ module tb_fc_engine;
     reg  [9:0]   fcw_addra   = 0;
     reg  [255:0] fcw_dina    = 0;
     wire         poolfc_re;
-    wire [9:0]   poolfc_addr;
+    wire [8:0]   poolfc_addr;          // 9-bit (= bank_sel + s_cnt[7:0])
     reg  [127:0] poolfc_dout = 128'd0;
     reg          prior_wdone = 0;
     wire         rdone;
@@ -69,15 +79,38 @@ module tb_fc_engine;
     );
 
     //==========================================================================
-    // poolfc 버퍼 (288 entries × 128-bit, 1-cycle latency)
-    // hex: 288 lines, 한 줄 = 32 hex chars = 128-bit
-    // [ch*8+:8] = channel ch (ch0=[7:0], ch15=[127:120])
+    // poolfc 버퍼 (depth 512, 128-bit per word, 1-cycle latency)
+    //
+    // hex 포맷 (new):
+    //   2304 lines × 8-bit = pooled.flatten() (shape (16, 12, 12))
+    //   line c*144 + s = channel c, spatial s (= h*12 + w)
+    //
+    // TB 가 byte array → spatial-major 128-bit 재조립:
+    //   poolfc_mem[s][c*8 +: 8] = byte_mem[c*144 + s]
+    //   bank 0: s=0..143. bank 1: s=144..287 (= bank 0 copy, single-image 용).
     //==========================================================================
-    reg [127:0] poolfc_mem [0:287];
+    reg  [7:0]   poolfc_byte_mem [0:2303];
+    reg  [127:0] poolfc_mem      [0:511];
 
-    initial begin
-        $readmemh("maxpool_output.hex", poolfc_mem, 0, 287);
-        $display("[TB] maxpool_output.hex loaded");
+    initial begin : poolfc_init
+        integer s, c;
+        $readmemh(`POOLFC_HEX, poolfc_byte_mem, 0, 2303);
+        $display("[TB] %s loaded (%0d bytes)", `POOLFC_HEX, 2304);
+
+        // bank 0: 16 byte → 128-bit per spatial (channel-major → spatial-major)
+        for (s = 0; s < 144; s = s + 1) begin
+            for (c = 0; c < 16; c = c + 1) begin
+                poolfc_mem[s][c*8 +: 8] = poolfc_byte_mem[c*144 + s];
+            end
+        end
+        // bank 1: copy bank 0 (single-image test 용 — ping-pong 검증 시 별도 데이터 필요)
+        for (s = 144; s < 288; s = s + 1) begin
+            poolfc_mem[s] = poolfc_mem[s - 144];
+        end
+        // depth 288..511 = padding, 0 유지.
+        for (s = 288; s < 512; s = s + 1) begin
+            poolfc_mem[s] = 128'd0;
+        end
     end
 
     always @(posedge clk) begin
@@ -86,30 +119,61 @@ module tb_fc_engine;
     end
 
     //==========================================================================
-    // Weight BRAM 로드
-    // fc1_weight_bram.hex: 1440 lines × 128-bit
-    //   line 2k   = even OC weights (pair=k/144, s=k%144), ch0..15
-    //   line 2k+1 = odd  OC weights
-    // 720번 write, 한 번에 256-bit: dina = {odd_128b, even_128b}
+    // Weight BRAM 로드 (SIMD-packed → 256-bit unpack 후 write)
+    //
+    // hex 포맷 (new):
+    //   11520 lines × 32-bit SIMD-packed
+    //   line pair*144*16 + s*16 + c = packed weight for (pair, spatial, channel)
+    //   packed = (W1 * 2^17 + W0) & 0x1FFFFFF  (25-bit pattern, MSB 7 = 0)
+    //     W0 (8-bit signed) = even OC weight
+    //     W1 (8-bit signed) = odd  OC weight
+    //
+    // SIMD unpack:
+    //   W0 = packed[7:0]                            (= packed[16:0] truncated)
+    //   W1 = packed[24:17] + (packed[16] ? 1 : 0)   (carry correction, W0<0 시)
+    //
+    // BMG 256-bit 조립 (per pair, spatial):
+    //   dina[127:0]  = {w0_ch15, w0_ch14, ..., w0_ch0}   (even OC, 16 ch concat)
+    //   dina[255:128]= {w1_ch15, w1_ch14, ..., w1_ch0}   (odd  OC, 16 ch concat)
     //==========================================================================
-    reg [127:0] weight_init_mem [0:1439];
+    reg [31:0] weight_simd_mem [0:11519];
 
     task load_weights;
-        integer i;
+        integer pair, s, c, line_idx;
+        reg signed [7:0]  w0, w1;
+        reg signed [16:0] w0_packed_17;
+        reg signed [7:0]  w1_packed_8;
+        reg [127:0]       w_even_concat, w_odd_concat;
         begin
-            $readmemh("fc1_weight_bram.hex", weight_init_mem);
-            $display("[TB] fc1_weight_bram.hex loaded");
-            // 256-bit씩 720번 write
-            for (i = 0; i < 720; i = i + 1) begin
-                @(negedge clk);
-                fcw_ena   = 1;
-                fcw_addra = i[9:0];
-                // MSB = odd weights, LSB = even weights
-                fcw_dina  = {weight_init_mem[i*2+1], weight_init_mem[i*2]};
+            $readmemh(`FCW_HEX, weight_simd_mem);
+            $display("[TB] %s loaded (%0d entries)", `FCW_HEX, 11520);
+
+            for (pair = 0; pair < 5; pair = pair + 1) begin
+                for (s = 0; s < 144; s = s + 1) begin
+                    w_even_concat = 128'd0;
+                    w_odd_concat  = 128'd0;
+                    for (c = 0; c < 16; c = c + 1) begin
+                        line_idx     = pair*144*16 + s*16 + c;
+                        w0_packed_17 = $signed(weight_simd_mem[line_idx][16:0]);
+                        w1_packed_8  = $signed(weight_simd_mem[line_idx][24:17]);
+                        // unpack
+                        w0 = w0_packed_17[7:0];
+                        w1 = w1_packed_8 + (w0_packed_17[16] ? 8'sd1 : 8'sd0);
+                        // concat: ch c 의 weight 를 [c*8 +: 8] 위치에
+                        w_even_concat[c*8 +: 8] = w0;
+                        w_odd_concat [c*8 +: 8] = w1;
+                    end
+
+                    @(negedge clk);
+                    fcw_ena   = 1;
+                    fcw_addra = pair * 144 + s;
+                    // BMG 256-bit: MSB = odd, LSB = even (engine 의 unpacking 정합)
+                    fcw_dina  = {w_odd_concat, w_even_concat};
+                end
             end
             @(negedge clk); fcw_ena = 0; fcw_addra = 0; fcw_dina = 0;
             @(posedge clk);
-            $display("[TB] Weight BRAM write done");
+            $display("[TB] Weight BRAM write done (720 entries)");
         end
     endtask
 
@@ -273,20 +337,21 @@ endmodule
 
 
 //==============================================================================
-// fc_weight_bram 수정 모델
-// Simple Dual-Port, 256-bit × 720, 1-cycle read latency
+// fc_weight_bram behavioral model
+// Simple Dual-Port, 256-bit × 1024 (BMG spec depth; 720 entries 사용)
+// Port A: write only — ENA + WEA 둘 다 결선 필수 (Byte Write Disable + Use ENA Pin)
+// Port B: read with L=1 (Primitive Output Register Disable)
 //
-// Write: wea=1, addra[9:0], dina[255:0] → mem[addra] = dina
-//   dina[127:0]  = even OC weights (ch0..15)
-//   dina[255:128] = odd  OC weights (ch0..15)
+// Write: ena=1 AND wea=1 → mem[addra] = dina
+//   dina[127:0]   = even OC weights (ch0..15 packed)
+//   dina[255:128] = odd  OC weights (ch0..15 packed)
 //
-// Read: enb=1, addrb[9:0] → 다음 사이클 doutb[255:0] 유효
-//   doutb[127:0]  = even OC weights
-//   doutb[255:128] = odd  OC weights
+// Read:  enb=1 → 다음 cycle doutb 유효
 //==============================================================================
 module fc_weight_bram (
     input  wire         clka,
-    input  wire         wea,
+    input  wire         ena,                  // ★ ENA (BMG Use ENA Pin)
+    input  wire         wea,                  // 1-bit WEA (Byte Write Disable)
     input  wire [9:0]   addra,
     input  wire [255:0] dina,
 
@@ -295,16 +360,17 @@ module fc_weight_bram (
     input  wire [9:0]   addrb,
     output reg  [255:0] doutb
 );
-    reg [255:0] mem [0:719];
+    reg [255:0] mem [0:1023];
 
     integer mi;
     initial begin
-        for (mi = 0; mi < 720; mi = mi + 1) mem[mi] = 256'd0;
+        for (mi = 0; mi < 1024; mi = mi + 1) mem[mi] = 256'd0;
         doutb = 256'd0;
     end
 
+    // Port A write: ENA AND WEA = 1 조건 (실제 BMG 거동과 일치)
     always @(posedge clka) begin
-        if (wea) mem[addra] <= dina;
+        if (ena && wea) mem[addra] <= dina;
     end
 
     always @(posedge clkb) begin

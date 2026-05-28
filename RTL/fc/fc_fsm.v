@@ -54,8 +54,35 @@ module fc_fsm (
     reg [1:0] state;
     reg [3:0] drain_cnt;
 
+    //==========================================================================
+    // Handshake counter (race-free, maxpool 패턴 차용)
+    //
+    // NBA 의 1-cycle 지연으로 인한 race 회피:
+    //   - prior_diff 자체는 register (NBA 로 update)
+    //   - data_ready 는 *combinational* prior_diff_next 기준으로 평가
+    //   - 같은 cycle 에 rdone 가 high 가 되어도, prior_diff_next 가 즉시 반영
+    //     → IDLE 의 transition check 가 정확한 값 사용
+    //
+    // 동일 cycle 의 race 시나리오 (maxpool 의 false positive 와 대칭):
+    //   - PS 가 start, maxpool 이 prior_wdone 을 같은 edge 에 pulse
+    //   - 수정 전: data_ready 가 stale prior_diff 봄 → 0 → start 손실 (false negative)
+    //   - 수정 후: prior_diff_next 가 prior_wdone 반영 → -1 → data_ready=1 → COMPUTE 진입 ✓
+    //
+    // 상세 분석: docs/handshake_counter_nba_race.md
+    //==========================================================================
     reg signed [2:0] prior_diff;
-    wire data_ready = (prior_diff < 3'sd0);
+    reg signed [2:0] prior_diff_next;
+
+    always @(*) begin
+        case ({rdone, prior_wdone})
+            2'b10:   prior_diff_next = prior_diff + 3'sd1;
+            2'b01:   prior_diff_next = prior_diff - 3'sd1;
+            2'b11:   prior_diff_next = prior_diff;
+            default: prior_diff_next = prior_diff;
+        endcase
+    end
+
+    wire data_ready = (prior_diff_next < 3'sd0);
 
     //==========================================================================
     // State + counters
@@ -143,20 +170,16 @@ module fc_fsm (
     end
 
     //==========================================================================
-    // Handshake counter + bank toggle
-    // prior_wdone increments available written banks.
-    // rdone consumes one readable bank.
+    // Handshake counter register update (next value 그대로 NBA)
+    //   prior_wdone increments available written banks.
+    //   rdone consumes one readable bank.
+    //   *_next 는 위에서 combinational 으로 계산 — race-free.
     //==========================================================================
     always @(posedge clk) begin
         if (rst)
             prior_diff <= 3'sd0;
-        else begin
-            case ({rdone, prior_wdone})
-                2'b10:   prior_diff <= prior_diff + 3'sd1;
-                2'b01:   prior_diff <= prior_diff - 3'sd1;
-                default: prior_diff <= prior_diff;
-            endcase
-        end
+        else
+            prior_diff <= prior_diff_next;
     end
 
     always @(posedge clk) begin

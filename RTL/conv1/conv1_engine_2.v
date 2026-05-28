@@ -46,7 +46,6 @@ module conv1_engine (
     //==========================================================================
     wire        load_start, load_done;
     wire        pipe_en, sel, lb_rst;
-    wire        pixel_valid;
     wire [4:0]  out_row, out_col;
     wire        out_valid, out_sel;
 
@@ -59,7 +58,6 @@ module conv1_engine (
         .pipe_en    (pipe_en),
         .sel        (sel),
         .lb_rst     (lb_rst),
-        .pixel_valid(pixel_valid),
         .out_row    (out_row),
         .out_col    (out_col),
         .out_valid  (out_valid),

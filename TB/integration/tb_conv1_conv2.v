@@ -121,7 +121,7 @@ module tb_conv1_conv2;
     );
 
     bram_c2_to_pool c2pool_bmg (
-        .clka  (clk), .ena (c2pool_we_a), .wea (1'b1),
+        .clka  (clk), .ena (c2pool_we_a), .wea (c2pool_we_a),
         .addra (c2pool_addr_a), .dina (c2pool_din_a),
         .clkb  (clk), .enb (c2pool_enb_b),
         .addrb (c2pool_addr_b), .doutb (c2pool_doutb_b)
@@ -341,7 +341,10 @@ module tb_conv1_conv2;
         $display("[TB] @ %0d : conv1_done received (Conv1 cycle: %0d)",
                  cycle_at_conv1_done, cycle_at_conv1_done - cycle_at_conv1_start);
 
-        // BMG settle (Conv1 의 마지막 write 가 mem 에 반영) — 약간 여유
+        // BMG settle (Conv1 의 마지막 write 가 mem 에 반영) — 약간 여유.
+        // 또한 conv2 의 LOAD_WEIGHTS (576 cycle) 가 끝나 prior_wdone 을 latch 할 수 있는
+        // 상태가 되었음을 보장. Conv1 compute (~1617 cycle) >> conv2 LOAD_WEIGHTS (576) 이므로
+        // 현 design 에서는 항상 safe; conv1 가 짧아지면 여기 추가 wait 필요.
         repeat (3) @(posedge clk);
 
         // Pulse Conv2 prior_wdone (= Conv1 데이터 ready 알림)
@@ -382,7 +385,7 @@ module tb_conv1_conv2;
     end
 
     initial begin
-        #500000;
+        #2000000;   // 200,000 cycle @ 100 MHz — conv1+conv2 전체 + 여유
         $display("[TB] !!! TIMEOUT @ cycle %0d !!!", cycle_cnt);
         $finish;
     end

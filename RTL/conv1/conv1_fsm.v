@@ -48,9 +48,6 @@ module conv1_fsm (
     // line_buffer / window_register 리셋 (RUN2 진입 전 클리어)
     output reg         lb_rst,
 
-    // pixel_valid: 유효 window (row>=2, col>=2)
-    output wire        pixel_valid,
-
     // 파이프라인 딜레이 보상 후 출력 주소
     output wire [4:0]  out_row,
     output wire [4:0]  out_col,
@@ -116,9 +113,9 @@ module conv1_fsm (
     end
 
     //==========================================================================
-    // pixel_valid
+    // pixel_valid: 유효 window (row>=2, col>=2). FSM 내부에서만 사용.
     //==========================================================================
-    assign pixel_valid = run_state && (row >= 5'd2) && (col >= 5'd2);
+    wire pixel_valid = run_state && (row >= 5'd2) && (col >= 5'd2);
 
     //==========================================================================
     // flush 카운터

@@ -4,9 +4,9 @@
 // Single-image bit-exact testbench for conv1_engine  (uses real BMG IPs)
 //
 //   3 real BMG IP instantiation:
-//     conv1_input_bram   (PS write Port A, Conv1 read Port B)  — 8-bit × 1024, L=2
-//     conv1_weight_bram  (PS write Port A, Conv1 read Port B)  — 32-bit × 64,  L=2, REGCEB pin exposed
-//     bram_c1_to_c2      (Conv1 write Port A, TB read Port B)  — 64-bit × 2048, L=2, byte-write 8-bit
+//     bram_input         (PS write Port A 32-bit × 512, Conv1 read Port B 8-bit × 2048, L=1)
+//     conv1_weight_bram  (PS write Port A, Conv1 read Port B) — 32-bit × 64, L=2, REGCEB exposed
+//     bram_c1_to_c2      (Conv1 write Port A, TB read Port B) — 64-bit × 2048, L=2, byte-write 8-bit
 //
 //   자극 sequence:
 //     reset → init_input() → init_weight() → start pulse → wait done → compare c1c2 BMG bank 0 vs expected
@@ -38,14 +38,15 @@ module tb_conv1_engine;
     wire         done;
 
     // ping-pong bank (standalone: 항상 0)
-    wire         bank_sel = 1'b0;
+    wire         input_bank_sel = 1'b0;
+    wire         bank_sel       = 1'b0;
 
-    // conv1_input_bram interface
-    reg          in_ena   = 1'b0;            // TB driving Port A (init_input)
+    // bram_input interface (asymmetric: Port A 32-bit × 512, Port B 8-bit × 2048)
+    reg          in_ena   = 1'b0;            // TB driving Port A (init_input, 32-bit burst)
     reg          in_wea   = 1'b0;
-    reg  [9:0]   in_addra = 10'd0;
-    reg  [7:0]   in_dina  = 8'd0;
-    wire [9:0]   in_addrb;                   // Conv1 reads Port B
+    reg  [8:0]   in_addra = 9'd0;            // word addr (= byte_addr/4)
+    reg  [31:0]  in_dina  = 32'd0;           // 4 bytes packed (little-endian)
+    wire [10:0]  in_addrb;                   // Conv1 reads Port B, byte addr
     wire         in_enb;
     wire signed [7:0] in_doutb;
 
@@ -70,7 +71,7 @@ module tb_conv1_engine;
     //==========================================================================
     // BMG IP 인스턴스 (사용자 측 Vivado 프로젝트에 생성 필요)
     //==========================================================================
-    conv1_input_bram in_bmg (
+    bram_input in_bmg (
         .clka  (clk),
         .ena   (in_ena),
         .wea   (in_wea),
@@ -116,6 +117,7 @@ module tb_conv1_engine;
         .start        (start),
         .done         (done),
 
+        .input_bank_sel (input_bank_sel),
         .bank_sel     (bank_sel),
 
         .in_bram_addr (in_addrb),
@@ -152,15 +154,19 @@ module tb_conv1_engine;
     // Task: init_input — Port A 로 784 cycle 동안 input image write
     //==========================================================================
     task init_input;
-        integer ii;
+        integer k;
         begin
-            $display("[TB] @ cycle %0d : init_input start (784 cycle)", cycle_cnt);
-            for (ii = 0; ii < 784; ii = ii + 1) begin
+            $display("[TB] @ cycle %0d : init_input start (196 word × 32-bit, bank 0)", cycle_cnt);
+            // 784 byte = 196 word (4 byte / word). Little-endian packing.
+            for (k = 0; k < 196; k = k + 1) begin
                 @(negedge clk);
                 in_ena   = 1'b1;
                 in_wea   = 1'b1;
-                in_addra = ii[9:0];
-                in_dina  = input_mem[ii];
+                in_addra = {1'b0, k[7:0]};         // bank 0 (MSB=0), word addr 0..195
+                in_dina  = {input_mem[k*4 + 3],
+                            input_mem[k*4 + 2],
+                            input_mem[k*4 + 1],
+                            input_mem[k*4 + 0]};
             end
             @(negedge clk);
             in_ena   = 1'b0;

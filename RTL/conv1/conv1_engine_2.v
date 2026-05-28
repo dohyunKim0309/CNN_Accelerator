@@ -14,10 +14,14 @@ module conv1_engine (
     output wire        done,
 
     // ping-pong bank select (외부에서 image 별 토글)
+    //   input_bank_sel : bram_input 의 read bank (Conv1 이 read 중인 image)
+    //   bank_sel       : c1c2 BMG 의 write bank (Conv1 의 출력 이미지)
+    //   두 신호는 image 별로 토글되지만 동시 토글일 필요는 없음 (PS / Conv2 와 handshake 각각).
+    input  wire        input_bank_sel,
     input  wire        bank_sel,
 
-    // 입력 BRAM (Read, Port B of conv1_input_bram)
-    output wire [9:0]        in_bram_addr,
+    // 입력 BRAM (Read, Port B of bram_input, depth 2048 = 2 bank × 1024)
+    output wire [10:0]       in_bram_addr,    // {input_bank_sel, in_addr[9:0]}
     output wire              in_bram_en,
     input  wire signed [7:0] in_bram_dout,
 
@@ -79,7 +83,8 @@ module conv1_engine (
         end
     end
 
-    assign in_bram_addr = in_addr;
+    // bank_sel prepended → 11-bit addr for BMG ping-pong
+    assign in_bram_addr = {input_bank_sel, in_addr};
     assign in_bram_en   = pipe_en;
 
     //==========================================================================

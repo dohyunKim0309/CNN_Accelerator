@@ -9,7 +9,7 @@
 
 module conv1_engine (
     input  wire        clk,
-    input  wire        rst,
+    input  wire        rst_n,
     input  wire        start,
     output wire        done,
 
@@ -50,7 +50,7 @@ module conv1_engine (
 
     conv1_fsm fsm (
         .clk        (clk),
-        .rst        (rst),
+        .rst_n      (rst_n),
         .start      (start),
         .load_start (load_start),
         .load_done  (load_done),
@@ -71,7 +71,7 @@ module conv1_engine (
     reg [9:0] in_addr;
 
     always @(posedge clk) begin
-        if (rst || lb_rst)
+        if (!rst_n || lb_rst)
             in_addr <= 10'd0;
         else if (pipe_en) begin
             if (in_addr == 10'd783)
@@ -93,7 +93,7 @@ module conv1_engine (
 
     conv1_weight_loader #(.NUM_PE(18), .ADDR_W(6)) wloader (
         .clk         (clk),
-        .rst         (rst),
+        .rst_n       (rst_n),
         .load_start  (load_start),
         .load_done   (load_done),
         .bram_addr   (w_bram_addr),
@@ -108,15 +108,16 @@ module conv1_engine (
     // 4. line_buffer x 2 (27-depth 구동으로 28클럭 지연 유도)
     //==========================================================================
     wire signed [7:0] lb1_out, lb2_out;
-    wire lb_rst_combined = rst | lb_rst;
+    // active-low 결합: 외부 rst_n=0 또는 내부 lb_rst=1 이면 리셋
+    wire lb_rst_combined_n = rst_n & ~lb_rst;
 
     conv1_line_buffer #(.WIDTH(8), .DEPTH(27)) lb1 (
-        .clk(clk), .rst(lb_rst_combined), .en(pipe_en),
+        .clk(clk), .rst_n(lb_rst_combined_n), .en(pipe_en),
         .din(in_bram_dout), .dout(lb1_out)
     );
 
     conv1_line_buffer #(.WIDTH(8), .DEPTH(27)) lb2 (
-        .clk(clk), .rst(lb_rst_combined), .en(pipe_en),
+        .clk(clk), .rst_n(lb_rst_combined_n), .en(pipe_en),
         .din(lb1_out), .dout(lb2_out)
     );
 
@@ -126,7 +127,7 @@ module conv1_engine (
     wire signed [7:0] k0,k1,k2,k3,k4,k5,k6,k7,k8;
 
     conv1_window_register #(.WIDTH(8)) win (
-        .clk(clk), .rst(lb_rst_combined), .en(pipe_en),
+        .clk(clk), .rst_n(lb_rst_combined_n), .en(pipe_en),
         .row2_in(in_bram_dout), .row1_in(lb1_out), .row0_in(lb2_out),
         .k0(k0),.k1(k1),.k2(k2),
         .k3(k3),.k4(k4),.k5(k5),
@@ -150,7 +151,7 @@ module conv1_engine (
     generate
         for (gi = 0; gi < 9; gi = gi + 1) begin : gen_g1
             conv1_pe_cell #(.DEPTH(2), .ADDR_W(1)) pe (
-                .clk(clk), .rst(rst),
+                .clk(clk), .rst_n(rst_n),
                 .packed_w(pe_packed_w),
                 .load_idx(pe_load_idx),
                 .load_en(pe_load_en[gi]),
@@ -163,7 +164,7 @@ module conv1_engine (
         end
         for (gi = 0; gi < 9; gi = gi + 1) begin : gen_g2
             conv1_pe_cell #(.DEPTH(2), .ADDR_W(1)) pe (
-                .clk(clk), .rst(rst),
+                .clk(clk), .rst_n(rst_n),
                 .packed_w(pe_packed_w),
                 .load_idx(pe_load_idx),
                 .load_en(pe_load_en[gi+9]),
@@ -182,7 +183,7 @@ module conv1_engine (
     wire signed [23:0] sum0_g1, sum1_g1, sum0_g2, sum1_g2;
 
     conv1_adder_tree at_g1 (
-        .clk(clk), .rst(rst), .en(pipe_en),
+        .clk(clk), .rst_n(rst_n), .en(pipe_en),
         .mul0_0(mul0_g1[0]),.mul0_1(mul0_g1[1]),.mul0_2(mul0_g1[2]),
         .mul0_3(mul0_g1[3]),.mul0_4(mul0_g1[4]),.mul0_5(mul0_g1[5]),
         .mul0_6(mul0_g1[6]),.mul0_7(mul0_g1[7]),.mul0_8(mul0_g1[8]),
@@ -193,7 +194,7 @@ module conv1_engine (
     );
 
     _conv1_adder_tree at_g2 (
-        .clk(clk), .rst(rst), .en(pipe_en),
+        .clk(clk), .rst_n(rst_n), .en(pipe_en),
         .mul0_0(mul0_g2[0]),.mul0_1(mul0_g2[1]),.mul0_2(mul0_g2[2]),
         .mul0_3(mul0_g2[3]),.mul0_4(mul0_g2[4]),.mul0_5(mul0_g2[5]),
         .mul0_6(mul0_g2[6]),.mul0_7(mul0_g2[7]),.mul0_8(mul0_g2[8]),
@@ -209,7 +210,7 @@ module conv1_engine (
     wire signed [7:0] tr_out0, tr_out1, tr_out2, tr_out3;
 
     conv1_truncate_relu tr (
-        .clk(clk), .rst(rst), .en(pipe_en),
+        .clk(clk), .rst_n(rst_n), .en(pipe_en),
         .sum0(sum0_g1), .sum1(sum1_g1),
         .sum2(sum0_g2), .sum3(sum1_g2),
         .out0(tr_out0), .out1(tr_out1),
@@ -230,7 +231,7 @@ module conv1_engine (
     reg [9:0] addr_pipe [0:2];
 
     always @(posedge clk) begin
-        if (rst) begin
+        if (!rst_n) begin
             ch0_final <= 8'sd0; ch1_final <= 8'sd0;
             ch2_final <= 8'sd0; ch3_final <= 8'sd0;
             

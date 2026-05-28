@@ -13,7 +13,7 @@ module tb_conv1_engine;
     // 1. 클럭 / 리셋
     //==========================================================================
     reg clk = 0;
-    reg rst = 1;
+    reg rst_n = 0;   // active-low: 0=리셋, 1=정상동작
     reg start = 0;
 
     always #5 clk = ~clk;   // 10ns = 100MHz
@@ -38,7 +38,7 @@ module tb_conv1_engine;
     wire              out_sel_r;
 
     conv1_engine dut (
-        .clk          (clk),          .rst          (rst),
+        .clk          (clk),          .rst_n        (rst_n),
         .start        (start),        .done         (done),
         .in_bram_addr (in_bram_addr), .in_bram_en   (in_bram_en),
         .in_bram_dout (in_bram_dout),
@@ -126,7 +126,7 @@ module tb_conv1_engine;
     //==========================================================================
     initial begin
         repeat(5)  @(posedge clk);
-        rst   = 0;
+        rst_n = 1;   // 리셋 해제
         repeat(2)  @(posedge clk);
         start = 1;
         @(posedge clk);

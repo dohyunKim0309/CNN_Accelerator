@@ -28,7 +28,7 @@ module tb_conv1_engine;
     // Clock / reset (100 MHz)
     //==========================================================================
     reg clk = 1'b0;
-    reg rst_n = 1'b0;
+    reg rst = 1'b1;        // active-high (시스템 통일)
     always #5 clk = ~clk;
 
     //==========================================================================
@@ -37,9 +37,7 @@ module tb_conv1_engine;
     reg          start    = 1'b0;
     wire         done;
 
-    // ping-pong bank (standalone: 항상 0)
-    wire         input_bank_sel = 1'b0;
-    wire         bank_sel       = 1'b0;
+    // ping-pong bank 은 conv1_engine 내부 toggle FF (internal-only) — TB driving 불필요.
 
     // bram_input interface (asymmetric: Port A 32-bit × 512, Port B 8-bit × 2048)
     reg          in_ena   = 1'b0;            // TB driving Port A (init_input, 32-bit burst)
@@ -113,12 +111,14 @@ module tb_conv1_engine;
     //==========================================================================
     conv1_engine dut (
         .clk          (clk),
-        .rst_n        (rst_n),
+        .rst          (rst),
         .start        (start),
         .done         (done),
 
-        .input_bank_sel (input_bank_sel),
-        .bank_sel     (bank_sel),
+        .prior_wdone  (1'b0),       // start 로 트리거 (legacy backup) — prior 미사용
+        .succ_rdone   (1'b0),       // downstream 없음
+        .rdone        (),           // 미사용
+        .wdone        (),           // 미사용 (done 으로 완료 감지)
 
         .in_bram_addr (in_addrb),
         .in_bram_en   (in_enb),
@@ -148,7 +148,7 @@ module tb_conv1_engine;
     integer cycle_at_start, cycle_at_done;
 
     initial cycle_cnt = 0;
-    always @(posedge clk) if (rst_n) cycle_cnt <= cycle_cnt + 1;
+    always @(posedge clk) if (!rst) cycle_cnt <= cycle_cnt + 1;
 
     //==========================================================================
     // Task: init_input — Port A 로 784 cycle 동안 input image write
@@ -247,11 +247,11 @@ module tb_conv1_engine;
         $display("[TB] Loading expected: %s", `CONV1_EXPECTED_HEX);
         $readmemh(`CONV1_EXPECTED_HEX, expected_c1c2);
 
-        // Reset
-        rst_n = 1'b0;
+        // Reset (active-high)
+        rst = 1'b1;
         repeat (10) @(posedge clk);
         @(negedge clk);
-        rst_n = 1'b1;
+        rst = 1'b0;
         $display("[TB] @ cycle %0d : reset released", cycle_cnt);
 
         // Init BMGs (Port A driving)

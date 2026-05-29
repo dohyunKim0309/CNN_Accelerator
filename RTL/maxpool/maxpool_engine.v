@@ -16,23 +16,26 @@ module maxpool_engine (
     output wire         rdone,
     output wire         wdone,
 
-    // C2Pool ping-pong buffer 읽기 (Port B). local addr only (0~575).
-    // bank prepend 는 c2pool_pingpong_buffer 가 자동 처리.
-    output wire [9:0]   c2pool_rd_addr,
+    // C2Pool ping-pong buffer 읽기 (Port B). physical addr = {input_bank_sel, local[9:0]}.
+    // conv2 패턴: maxpool 내부 bank_sel 을 prepend (dumb 2-bank BMG 전제).
+    output wire [10:0]  c2pool_rd_addr,
     output wire         c2pool_rd_en,
     input  wire signed [127:0] c2pool_rd_data,  // 16채널 packed
 
-    // PoolFC buffer 쓰기 (Port A)
+    // PoolFC buffer 쓰기 (Port A). physical addr = {output_bank_sel, out_addr[7:0]}.
     output wire [8:0]   poolfc_wr_addr,
     output wire         poolfc_wr_en,
-    output wire [127:0] poolfc_wr_data,
-    input  wire         poolfc_bank_sel
+    output wire [127:0] poolfc_wr_data
 );
 
     //==========================================================================
     // 내부 시그널 선언
     //==========================================================================
     wire         mc_en;
+
+    wire [9:0]   fsm_rd_addr;          // local read addr (0~575), engine 이 bank prepend
+    wire         fsm_input_bank_sel;   // c2pool read bank
+    wire         fsm_output_bank_sel;  // poolfc write bank
 
     // Verilog 호환을 위해 unpacked array port 제거
     wire signed [127:0] p00_flat;
@@ -58,8 +61,10 @@ module maxpool_engine (
         .succ_rdone (succ_rdone),
         .rdone      (rdone),
         .wdone      (wdone),
+        .input_bank_sel (fsm_input_bank_sel),
+        .output_bank_sel(fsm_output_bank_sel),
 
-        .rd_addr    (c2pool_rd_addr),
+        .rd_addr    (fsm_rd_addr),
         .rd_en      (c2pool_rd_en),
         .rd_data    (c2pool_rd_data),
 
@@ -89,11 +94,13 @@ module maxpool_engine (
 
     //==========================================================================
     // 3. Output Stream Packing & Bank Address Generation
+    //   conv2 패턴: c2pool read / poolfc write 의 bank_sel 을 maxpool 내부에서
+    //   관리하고 physical addr 에 prepend (dumb 2-bank BMG 전제).
     //==========================================================================
-    assign poolfc_wr_data = max_out_flat;
+    assign c2pool_rd_addr = {fsm_input_bank_sel, fsm_rd_addr};
 
-    // MSB: bank 선택, LSB 8bit: bank 내부 주소
-    assign poolfc_wr_addr = {poolfc_bank_sel, out_addr};
+    assign poolfc_wr_data = max_out_flat;
+    assign poolfc_wr_addr = {fsm_output_bank_sel, out_addr};
     assign poolfc_wr_en   = out_valid;
 
 endmodule

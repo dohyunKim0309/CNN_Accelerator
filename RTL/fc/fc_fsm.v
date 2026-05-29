@@ -20,9 +20,9 @@
 module fc_fsm (
     input  wire        clk,
     input  wire        rst,
-    input  wire        start,
+    input  wire        start,                // legacy system arm pulse (init 용)
 
-    // Handshake with previous ping-pong buffer
+    // Handshake with previous ping-pong buffer (maxpool / poolfc)
     input  wire        prior_wdone,
     output reg         rdone,
     output reg         input_bank_sel,
@@ -55,7 +55,7 @@ module fc_fsm (
     reg [3:0] drain_cnt;
 
     //==========================================================================
-    // Handshake counter (race-free, maxpool 패턴 차용)
+    // Handshake counter (race-free, conv2 / maxpool 패턴 차용)
     //
     // NBA 의 1-cycle 지연으로 인한 race 회피:
     //   - prior_diff 자체는 register (NBA 로 update)
@@ -63,10 +63,8 @@ module fc_fsm (
     //   - 같은 cycle 에 rdone 가 high 가 되어도, prior_diff_next 가 즉시 반영
     //     → IDLE 의 transition check 가 정확한 값 사용
     //
-    // 동일 cycle 의 race 시나리오 (maxpool 의 false positive 와 대칭):
-    //   - PS 가 start, maxpool 이 prior_wdone 을 같은 edge 에 pulse
-    //   - 수정 전: data_ready 가 stale prior_diff 봄 → 0 → start 손실 (false negative)
-    //   - 수정 후: prior_diff_next 가 prior_wdone 반영 → -1 → data_ready=1 → COMPUTE 진입 ✓
+    // FC 는 terminal layer 이므로 output 측 handshake 없음.
+    // ready_to_compute = data_ready (= output_avail 1'b1 고정).
     //
     // 상세 분석: docs/handshake_counter_nba_race.md
     //==========================================================================
@@ -82,7 +80,25 @@ module fc_fsm (
         endcase
     end
 
-    wire data_ready = (prior_diff_next < 3'sd0);
+    wire data_ready       = (prior_diff_next < 3'sd0);
+    wire output_avail     = 1'b1;                          // FC=terminal: 항상 true
+    wire ready_to_compute = data_ready && output_avail;
+
+    //==========================================================================
+    // start edge-detect — system arm pulse (init 용 backup trigger).
+    //
+    //   conv1 / maxpool 패턴: 첫 image 진입 전 PS 가 한 번 pulse 하면 즉시 COMPUTE 진입.
+    //   이후 image 는 prior_wdone 만으로 자동 trigger (data_ready 가 다음 cycle 에 true).
+    //
+    //   level signal 직접 사용 시 high 가 여러 cycle 지속되면 재트리거 위험 → edge-detect.
+    //==========================================================================
+    reg start_d;
+    wire start_pulse = start & ~start_d;
+
+    always @(posedge clk) begin
+        if (rst) start_d <= 1'b0;
+        else     start_d <= start;
+    end
 
     //==========================================================================
     // State + counters
@@ -96,12 +112,18 @@ module fc_fsm (
             drain_cnt <= 4'd0;
         end else begin
             case (state)
+                //--------------------------------------------------------------
+                // IDLE: 새 image 대기.
+                //   - ready_to_compute (= data_ready, prior_wdone 도착) 또는
+                //   - start_pulse (system arm) 이면 즉시 COMPUTE 진입.
+                //   - conv1 / maxpool 패턴 정합 — image-by-image trigger 는 handshake 만.
+                //--------------------------------------------------------------
                 IDLE: begin
                     s_cnt     <= 8'd0;
                     pair_cnt  <= 3'd0;
                     wbase     <= 10'd0;
                     drain_cnt <= 4'd0;
-                    if (start && data_ready)
+                    if (ready_to_compute || start_pulse)
                         state <= COMPUTE;
                 end
 

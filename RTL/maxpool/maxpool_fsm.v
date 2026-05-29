@@ -14,7 +14,11 @@ module maxpool_fsm (
     output reg          rdone,            // c2pool read 완료 (= done, P0 단순 매핑)
     output reg          wdone,            // poolfc write 완료 (= done, P0 단순 매핑)
 
-    // local addr only (0~575). bank prepend 은 c2pool_pingpong_buffer 가 자동.
+    // Bank select (conv2_fsm 패턴 — maxpool 내부 관리, engine 이 addr 에 prepend)
+    output reg          input_bank_sel,   // c2pool read bank  : rdone 시 toggle
+    output reg          output_bank_sel,  // poolfc write bank : wdone 시 toggle
+
+    // local addr only (0~575). engine 이 input_bank_sel 을 prepend.
     output reg  [9:0]   rd_addr,
     output reg          rd_en,
     input  wire signed [127:0] rd_data,
@@ -280,6 +284,31 @@ module maxpool_fsm (
                 default: after_diff <= after_diff;
             endcase
         end
+    end
+
+    //=========================================================================
+    // Bank select toggle FF (conv2_fsm 패턴 — maxpool 내부 관리)
+    //   input_bank_sel  : c2pool read bank, rdone 시 toggle
+    //   output_bank_sel : poolfc write bank, wdone 시 toggle
+    //
+    //   이전엔 TB 가 maxpool_rdone_count[0] / wdone_count[0] 로 derive 했으나,
+    //   conv1 / conv2 / FC 와 동일하게 RTL 내부에서 관리하도록 표준화.
+    //   rdone/wdone 이 image 종료 시점(DONE)에 pulse → 다음 image 의 read/write
+    //   에 새 bank 적용. 현재 image 의 마지막 read/write 는 toggle 이전 값 사용
+    //   (RUN/FLUSH 구간엔 pulse 없음 → race 없음).
+    //=========================================================================
+    always @(posedge clk) begin
+        if (rst)
+            input_bank_sel <= 1'b0;
+        else if (rdone)
+            input_bank_sel <= ~input_bank_sel;
+    end
+
+    always @(posedge clk) begin
+        if (rst)
+            output_bank_sel <= 1'b0;
+        else if (wdone)
+            output_bank_sel <= ~output_bank_sel;
     end
 
     //=========================================================================

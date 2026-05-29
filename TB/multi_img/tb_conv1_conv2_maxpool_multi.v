@@ -27,8 +27,8 @@
 //   ping-pong bank (모두 race-free):
 //     conv1 input/output bank = conv1 내부 toggle FF (옵션 B 적용 후 RTL 측에서 관리)
 //     conv2 자체 bank         = 자동 (fsm_input_bank_sel, fsm_output_bank_sel — 내부 counter)
-//     c2pool read bank        = maxpool_rdone_count[0] (TB 가 BMG addrb prepend)
-//     poolfc write bank       = maxpool_wdone_count[0] (TB 가 driving maxpool.poolfc_bank_sel)
+//     c2pool read bank        = maxpool 내부 input_bank_sel toggle FF (RTL 표준화)
+//     poolfc write bank       = maxpool 내부 output_bank_sel toggle FF (RTL 표준화)
 //     bram_input write bank   = write_input task 내부 local `bank = img_idx[0]`
 //                               (conv1 의 input_bank_sel reset 후 0 부터 1씩 toggle 과 sync)
 //
@@ -112,7 +112,7 @@ module tb_conv1_conv2_maxpool_multi;
     wire         c2pool_we_a;
     wire [10:0]  c2pool_addr_a;
     wire [127:0] c2pool_din_a;
-    wire [9:0]   maxpool_c2pool_rd_addr;       // 10-bit local addr from maxpool
+    wire [10:0]  maxpool_c2pool_rd_addr;       // 11-bit physical {input_bank_sel, local} from maxpool
     wire         c2pool_re_b;
     wire [127:0] c2pool_doutb_b;
 
@@ -120,7 +120,6 @@ module tb_conv1_conv2_maxpool_multi;
     wire [8:0]   poolfc_wr_addr;
     wire         poolfc_wr_en;
     wire [127:0] poolfc_wr_data;
-    wire         poolfc_bank_sel;              // = wdone_count[0]
 
     //==========================================================================
     // Counters (handshake-tracked, used for ping-pong bank derivation + backpressure)
@@ -128,8 +127,8 @@ module tb_conv1_conv2_maxpool_multi;
     integer conv1_rdone_count    = 0;          // dispatcher backpressure (옵션 B 후 bank derive 용도 제거)
     integer conv1_wdone_count    = 0;          // 통계/debug 용 — 옵션 B 후 bank derive 미사용
     integer conv2_rdone_count    = 0;
-    integer maxpool_rdone_count  = 0;          // c2pool read bank
-    integer maxpool_wdone_count  = 0;          // poolfc write bank
+    integer maxpool_rdone_count  = 0;          // 통계/debug (bank derive 는 maxpool 내부로 이동)
+    integer maxpool_wdone_count  = 0;          // 통계/debug (bank derive 는 maxpool 내부로 이동)
 
     always @(posedge clk) begin
         if (rst) begin
@@ -148,14 +147,14 @@ module tb_conv1_conv2_maxpool_multi;
     end
 
     //==========================================================================
-    // Bank derivation (TB driving — c2pool / poolfc 만)
+    // Bank derivation
     //==========================================================================
-    //   conv1 의 input_bank_sel / bank_sel 은 옵션 B 적용 후 conv1 내부 register 로
-    //   이동되어 TB 가 driving 하지 않는다.
-    //   conv2 는 원래부터 내부 fsm_input_bank_sel / fsm_output_bank_sel 사용.
-    //   c2pool / poolfc 는 maxpool 이 외부 input_bank_sel 패턴이라 TB 가 derive.
-    wire   c2pool_read_bank = maxpool_rdone_count[0];
-    assign poolfc_bank_sel  = maxpool_wdone_count[0];
+    //   모든 레이어가 RTL 내부에서 자기 bank 를 관리한다 (TB driving 없음):
+    //     conv1   : 내부 input_bank_sel / bank_sel toggle FF
+    //     conv2   : 내부 fsm_input_bank_sel / fsm_output_bank_sel
+    //     maxpool : 내부 input_bank_sel (c2pool read) / output_bank_sel (poolfc write)
+    //               — 표준화 후 maxpool 이 physical addr 을 직접 내보냄.
+    //   따라서 c2pool / poolfc BMG 는 dumb 2-bank memory 로만 동작.
 
     //==========================================================================
     // BMG IP instances
@@ -186,7 +185,7 @@ module tb_conv1_conv2_maxpool_multi;
         .clka  (clk), .ena (c2pool_we_a), .wea (c2pool_we_a),
         .addra (c2pool_addr_a), .dina (c2pool_din_a),
         .clkb  (clk), .enb (c2pool_re_b),
-        .addrb ({c2pool_read_bank, maxpool_c2pool_rd_addr}),     // TB 가 bank prepend
+        .addrb (maxpool_c2pool_rd_addr),     // maxpool 이 physical addr 직접 출력 (11-bit)
         .doutb (c2pool_doutb_b)
     );
 
@@ -274,8 +273,7 @@ module tb_conv1_conv2_maxpool_multi;
 
         .poolfc_wr_addr  (poolfc_wr_addr),
         .poolfc_wr_en    (poolfc_wr_en),
-        .poolfc_wr_data  (poolfc_wr_data),
-        .poolfc_bank_sel (poolfc_bank_sel)
+        .poolfc_wr_data  (poolfc_wr_data)
     );
 
     //==========================================================================

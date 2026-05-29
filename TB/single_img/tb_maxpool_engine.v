@@ -57,7 +57,7 @@ module tb_maxpool_engine;
     reg  [10:0]  c2pool_addra = 11'd0;
     reg  [127:0] c2pool_dina  = 128'd0;
 
-    wire [9:0]   c2pool_rd_addr;             // local addr from maxpool (P0-1 적용 후 10-bit)
+    wire [10:0]  c2pool_rd_addr;             // physical addr {input_bank_sel, local} (11-bit)
     wire         c2pool_rd_en;
     wire signed [127:0] c2pool_rd_data;
 
@@ -65,7 +65,6 @@ module tb_maxpool_engine;
     wire [8:0]   poolfc_wr_addr;
     wire         poolfc_wr_en;
     wire [127:0] poolfc_wr_data;
-    reg          poolfc_bank_sel = 1'b0;
 
     //==========================================================================
     // BMG IP: bram_c2_to_pool
@@ -79,7 +78,7 @@ module tb_maxpool_engine;
 
         .clkb  (clk),
         .enb   (c2pool_rd_en),
-        .addrb ({1'b0, c2pool_rd_addr}),       // bank 0 + local 10-bit
+        .addrb (c2pool_rd_addr),               // maxpool 이 physical addr 직접 출력 (single img → bank 0)
         .doutb (c2pool_rd_data)
     );
 
@@ -103,8 +102,7 @@ module tb_maxpool_engine;
 
         .poolfc_wr_addr  (poolfc_wr_addr),
         .poolfc_wr_en    (poolfc_wr_en),
-        .poolfc_wr_data  (poolfc_wr_data),
-        .poolfc_bank_sel (poolfc_bank_sel)
+        .poolfc_wr_data  (poolfc_wr_data)
     );
 
     //==========================================================================

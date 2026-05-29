@@ -4,9 +4,18 @@
 // Description:
 //   FC layer engine for channel-major packed input.
 //
-//   Input BRAM:
+//   Handshake (conv2 패턴 정합):
+//     prior_wdone : maxpool 의 wdone direct wire (입력 image 준비 알림)
+//     rdone       : FC 가 poolfc bank read 완료 1-cycle pulse
+//     input_bank_sel : 내부 toggle FF, rdone 시 토글 (ping-pong)
+//     start       : legacy system arm pulse (init 용 backup, 이후 handshake 자동)
+//   FC 는 terminal layer 이므로 output 측 handshake (succ_rdone, wdone, output_bank_sel)
+//   없음. argmax 결과는 class_idx / class_valid 로 직출.
+//
+//   Input BRAM (poolfc):
 //     width = 128-bit = 16ch * 8-bit
-//     depth = 144 spatial words
+//     depth = 512 = 2 bank * 256 (144 만 유효, 나머지 padding)
+//     addr  = {input_bank_sel, s_cnt[7:0]}   — maxpool 의 write 포맷과 일치
 //     one address contains all 16 channels for the same spatial position
 //
 //   Weight BRAM:
@@ -38,10 +47,11 @@ module fc_engine #(
 
     //==========================================================================
     // poolfc buffer read port
-    // 128-bit x 144 per bank, 1-cycle read latency
+    //   128-bit × 512 (2 bank × 256), 1-cycle read latency.
+    //   addr = {input_bank_sel, s_cnt[7:0]} — bank=0: 0..143, bank=1: 256..399.
     //==========================================================================
     output wire         poolfc_re,
-    output wire [8:0]   poolfc_addr,         // {bank_sel, s_cnt[7:0]}; max addr = 287 ≤ 511 (depth 512)
+    output wire [8:0]   poolfc_addr,         // {input_bank_sel, s_cnt[7:0]}
     input  wire [127:0] poolfc_dout,
 
     //==========================================================================
@@ -86,15 +96,18 @@ module fc_engine #(
     );
 
     //==========================================================================
-    // 2. Input BRAM address
-    // If there is no ping-pong bank, use only fsm_s_cnt in the connected memory.
-    // If two banks are stored in one BRAM, this maps:
-    //   bank0: 0..143
-    //   bank1: 144..287
+    // 2. Input BRAM address (poolfc)
+    //
+    //   Bank format: {bank_sel, s_cnt[7:0]} — 9-bit, top bit = bank.
+    //     bank=0 : addr {0, 0}..{0, 143} = 0..143
+    //     bank=1 : addr {1, 0}..{1, 143} = 256..399
+    //
+    //   ★ maxpool 의 poolfc_wr_addr = {output_bank_sel, out_addr[7:0]} 와 동일 포맷.
+    //   이전엔 `(bank ? (144 + s_cnt) : s_cnt)` 였는데 (144..287) maxpool 의 write
+    //   range (256..399) 와 mismatch → bank 1 read 시 빈 영역에서 0 만 읽음.
     //==========================================================================
     assign poolfc_re   = fsm_comp_v;
-    assign poolfc_addr = (fsm_input_bank_sel) ? (9'd144 + {1'd0, fsm_s_cnt})
-                                              : ({1'd0, fsm_s_cnt});
+    assign poolfc_addr = {fsm_input_bank_sel, fsm_s_cnt};
 
     //==========================================================================
     // 3. Weight BRAM, 256-bit x 720, 1-cycle read latency

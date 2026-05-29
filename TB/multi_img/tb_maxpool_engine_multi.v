@@ -12,9 +12,9 @@
 //     bram_c2_to_pool : 128-bit × 2048, L=1, byte-write disable
 //
 //   ping-pong logic:
-//     c2pool BMG Port A 쓰기 bank = i & 1 (write 시)
-//     c2pool BMG Port B 읽기 bank = rdone_count & 1 (maxpool 처리 중인 image LSB)
-//     poolfc_bank_sel = wdone_count[0] (maxpool 이 다음 write 할 bank)
+//     c2pool BMG Port A 쓰기 bank = i & 1 (가상 conv2 writer)
+//     c2pool BMG Port B 읽기 bank = maxpool 내부 input_bank_sel (rdone toggle, RTL 표준화)
+//     poolfc write bank          = maxpool 내부 output_bank_sel (wdone toggle, RTL 표준화)
 //
 //   Backpressure: c2pool_writer 가 (i - rdone_count) < 2 일 때 만 진행 → 2-bank 충돌 방지
 //
@@ -55,7 +55,7 @@ module tb_maxpool_engine_multi;
     reg  [10:0]  c2pool_addra  = 11'd0;
     reg  [127:0] c2pool_dina   = 128'd0;
 
-    wire [9:0]   c2pool_rd_addr;            // local addr from maxpool (P0-1, 10-bit)
+    wire [10:0]  c2pool_rd_addr;            // physical addr {input_bank_sel, local} (11-bit)
     wire         c2pool_rd_en;
     wire signed [127:0] c2pool_rd_data;
 
@@ -63,7 +63,6 @@ module tb_maxpool_engine_multi;
     wire [8:0]   poolfc_wr_addr;
     wire         poolfc_wr_en;
     wire [127:0] poolfc_wr_data;
-    wire         poolfc_bank_sel;           // 외부 driving (wdone_count LSB)
 
     //==========================================================================
     // Counters (rdone / wdone)
@@ -82,12 +81,11 @@ module tb_maxpool_engine_multi;
     end
 
     //==========================================================================
-    // ping-pong bank assignments
-    //   c2pool read bank = rdone_count LSB (maxpool 이 처리 중인 image LSB)
-    //   poolfc write bank = wdone_count LSB (maxpool 이 다음 write 할 bank)
+    // ping-pong bank: maxpool 내부에서 관리 (RTL 표준화 후 TB driving 불필요).
+    //   c2pool read  bank = maxpool input_bank_sel  (rdone toggle = rdone_count[0])
+    //   poolfc write bank = maxpool output_bank_sel (wdone toggle = wdone_count[0])
+    //   rdone_count 는 backpressure 에 계속 사용, wdone_count 는 통계용.
     //==========================================================================
-    wire c2pool_read_bank = rdone_count[0];
-    assign poolfc_bank_sel = wdone_count[0];
 
     //==========================================================================
     // BMG IP: bram_c2_to_pool (Port B addrb = {read_bank, local_10b})
@@ -101,7 +99,7 @@ module tb_maxpool_engine_multi;
 
         .clkb  (clk),
         .enb   (c2pool_rd_en),
-        .addrb ({c2pool_read_bank, c2pool_rd_addr}),
+        .addrb (c2pool_rd_addr),                 // maxpool 이 physical addr 직접 출력 (11-bit)
         .doutb (c2pool_rd_data)
     );
 
@@ -125,8 +123,7 @@ module tb_maxpool_engine_multi;
 
         .poolfc_wr_addr  (poolfc_wr_addr),
         .poolfc_wr_en    (poolfc_wr_en),
-        .poolfc_wr_data  (poolfc_wr_data),
-        .poolfc_bank_sel (poolfc_bank_sel)
+        .poolfc_wr_data  (poolfc_wr_data)
     );
 
     //==========================================================================
@@ -209,7 +206,7 @@ module tb_maxpool_engine_multi;
             bank = img_idx[0];
             mm   = 0;
 
-            // poolfc_wr_addr = {poolfc_bank_sel, out_addr[7:0]} → bank*256 + pixel
+            // poolfc_wr_addr = {output_bank_sel, out_addr[7:0]} → bank*256 + pixel
             for (pixel = 0; pixel < 144; pixel = pixel + 1) begin
                 got = poolfc_mem[{bank, pixel[7:0]}];
                 exp = maxpool_expect[img_idx * 144 + pixel];

@@ -32,22 +32,37 @@ module fc_pe_array (
             wire signed [7:0]  x_ch  = x_flat [ch*8 +: 8];
             wire signed [7:0]  w0_ch = w0_flat[ch*8 +: 8];
             wire signed [7:0]  w1_ch = w1_flat[ch*8 +: 8];
-            wire signed [15:0] p0_ch;
-            wire signed [15:0] p1_ch;
 
-            fc_pe_cell cell_inst (
-                .clk   (clk),
-                .rst   (rst),
-                .en    (en),
-                .x     (x_ch),
-                .w0    (w0_ch),
-                .w1    (w1_ch),
-                .p0_out(p0_ch),
-                .p1_out(p1_ch)
+            // SIMD A-port pack: A = W1*2^17 + W0 (25b), W0<0 carry 보정.
+            //   [7:0]   = W0
+            //   [16:8]  = {9{W0[7]}}  (sign extension)
+            //   [24:17] = W1 + (W0<0 ? -1 : 0)
+            // 공용 core/pe_cell (STREAM=1) 의 A포트가 받는 packed_w 포맷.
+            wire               w0_neg      = w0_ch[7];
+            wire signed [7:0]  w1_adj      = w1_ch + (w0_neg ? 8'shFF : 8'sh00);
+            wire        [24:0] packed_w_ch = { w1_adj, {9{w0_neg}}, w0_ch[7:0] };
+
+            wire signed [16:0] p0_ch;   // core/pe_cell 출력 17b
+            wire signed [16:0] p1_ch;
+
+            pe_cell #(.STREAM(1), .DEPTH(1)) cell_inst (
+                .clk     (clk),
+                .rst     (rst),
+                .packed_w(packed_w_ch),
+                .load_idx(1'b0),       // STREAM 에서 미사용
+                .load_en (1'b0),       // STREAM 에서 미사용
+                .sel     (1'b0),       // STREAM 에서 미사용
+                .en      (en),
+                .x       (x_ch),
+                .mul0    (p0_ch),
+                .mul1    (p1_ch)
             );
 
-            assign p0_flat[ch*16 +: 16] = p0_ch;
-            assign p1_flat[ch*16 +: 16] = p1_ch;
+            // adder_tree 입력은 16b/lane → 하위 16b 취함.
+            //   INT8 양자화에서 |W*X| <= 127*128 = 16256 < 32767 → 17번째 비트는
+            //   항상 부호확장(p_ch[16]==p_ch[15]) 이므로 [15:0] 슬라이스는 무손실.
+            assign p0_flat[ch*16 +: 16] = p0_ch[15:0];
+            assign p1_flat[ch*16 +: 16] = p1_ch[15:0];
         end
     endgenerate
 

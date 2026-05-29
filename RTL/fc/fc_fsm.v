@@ -49,7 +49,7 @@ module fc_fsm (
 
     // Datapath latency drain margin.
     // Engine aligns control internally; this just keeps busy long enough after last issue.
-    localparam [3:0] DRAIN_MAX = 4'd8;
+    localparam [3:0] DRAIN_MAX = 4'd10;   // PE 2→4 cycle (+2): datapath drain margin 확대
 
     reg [1:0] state;
     reg [3:0] drain_cnt;

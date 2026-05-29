@@ -137,28 +137,32 @@ module fc_engine #(
     //==========================================================================
     // 4. Valid/control alignment
     //
+    // PE 는 공용 core/pe_cell (DSP 3-stage + 출력 reg = 4-cycle latency).
     // Timeline for an issued spatial word at cycle T (BRAM L=1):
-    //   T+1 : BRAM doutb valid           — PE x/w inputs valid (combinational)
-    //   T+2 : PE stage1 reg (p_dsp_r)    — pe_en @ T+1 = 1 필요
-    //   T+3 : PE stage2 reg (p0_out)     — pe_en @ T+2 = 1 필요
-    //   T+4 : adder stage1 reg (e1)      — adder_en @ T+3 = 1 필요
-    //   T+5 : adder stage2 reg (e2)
-    //   T+6 : adder stage3 reg (e3)
-    //   T+7 : adder stage4 reg (sum0/1)  — adder_en @ T+6 = 1 필요
-    //   T+8 : accumulator update         — acc_en @ T+7 = 1 필요
+    //   T+1 : BRAM doutb valid           — PE x/packed_w inputs valid (combinational)
+    //   T+2 : DSP A/B latch              — pe_en @ T+1 = 1 필요
+    //   T+3 : DSP M latch                — pe_en @ T+2 = 1 필요
+    //   T+4 : DSP P latch                — pe_en @ T+3 = 1 필요
+    //   T+5 : PE 출력 reg (mul0/mul1)    — pe_en @ T+4 = 1 필요
+    //   T+6 : adder stage1 reg (e1)      — adder_en @ T+5 = 1 필요
+    //   T+7 : adder stage2 reg (e2)
+    //   T+8 : adder stage3 reg (e3)
+    //   T+9 : adder stage4 reg (sum0/1)  — adder_en @ T+8 = 1 필요
+    //   T+10: accumulator update         — acc_en @ T+9 = 1 필요
     //
     // comp_pipe[k] @ cycle C = fsm_comp_v @ cycle (C-k-1) (1-cycle 등록 지연부터).
-    // 따라서:
-    //   pe_en    = comp_pipe[0] | comp_pipe[1]                   (covers T+1, T+2)
-    //   adder_en = comp_pipe[2] | comp_pipe[3] | comp_pipe[4]
-    //                          | comp_pipe[5]                    (covers T+3..T+6)
-    //   acc_en/clear/last/pair = *_pipe[6]                       (covers T+7)
+    // 따라서 (index k = X-(T+1)):
+    //   pe_en    = comp_pipe[0] | comp_pipe[1] | comp_pipe[2]
+    //                          | comp_pipe[3]                    (covers T+1..T+4)
+    //   adder_en = comp_pipe[4] | comp_pipe[5] | comp_pipe[6]
+    //                          | comp_pipe[7]                    (covers T+5..T+8)
+    //   acc_en/clear/last/pair = *_pipe[8]                       (covers T+9)
     //
     // 주의: accumulator 의 logit 캡처는 "acc + sum" 형태로 마지막 spatial 포함.
-    // (RTL/fc/accumulator.v 의 last=1 branch 참조; sp(last) 가 acc0_OLD 에
+    // (RTL/fc/fc_accumulator.v 의 last=1 branch 참조; sp(last) 가 acc0_OLD 에
     //  아직 없을 때도 combinational add 로 logit 에 반영.)
     //==========================================================================
-    localparam CTRL_DELAY = 6;
+    localparam CTRL_DELAY = 8;
 
     reg [CTRL_DELAY:0] comp_pipe;
     reg [CTRL_DELAY:0] first_pipe;
@@ -188,8 +192,8 @@ module fc_engine #(
         end
     end
 
-    wire pe_en    = comp_pipe[0] | comp_pipe[1];
-    wire adder_en = comp_pipe[2] | comp_pipe[3] | comp_pipe[4] | comp_pipe[5];
+    wire pe_en    = comp_pipe[0] | comp_pipe[1] | comp_pipe[2] | comp_pipe[3];
+    wire adder_en = comp_pipe[4] | comp_pipe[5] | comp_pipe[6] | comp_pipe[7];
 
     wire       acc_en    = comp_pipe [CTRL_DELAY];
     wire       acc_clear = first_pipe[CTRL_DELAY];

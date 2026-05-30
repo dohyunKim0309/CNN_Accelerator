@@ -9,6 +9,8 @@ concatenated big-file 만 dump (multi_img TB 의 $readmemh 용):
   - all_c1c2.hex      : 100 × 1024 = 102,400 lines × 64-bit
   - all_c2pool.hex    : 100 × 576  = 57,600  lines × 128-bit
   - all_maxpool.hex   : 100 × 144  = 14,400  lines × 128-bit
+  - all_fc_logit.hex  : 100 × 10   = 1,000   lines × 24-bit (signed, fc golden logit)
+  - all_fc_output.hex : 100 × 10   = 1,000   lines × 8-bit  (fc1_sat 예측)
 
 Hex 포맷:
   c1c2 (64-bit, 16 hex chars/line, **padded h*32+w**):
@@ -36,10 +38,12 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # 경로 (스크립트 디렉토리에서 실행 가정)
 # ---------------------------------------------------------------------------
-INPUT_FILE   = "../../data/_base_npy/input.npy"
-WEIGHT1_FILE = "../../data/_base_npy/layer1_0_weight.npy"
-WEIGHT2_FILE = "../../data/_base_npy/layer2_0_weight.npy"
-OUTPUT_DIR   = "../../data/multi_img"
+HERE         = os.path.dirname(os.path.abspath(__file__))
+INPUT_FILE   = os.path.join(HERE, "../../data/_base_npy/input.npy")
+WEIGHT1_FILE = os.path.join(HERE, "../../data/_base_npy/layer1_0_weight.npy")
+WEIGHT2_FILE = os.path.join(HERE, "../../data/_base_npy/layer2_0_weight.npy")
+FC1_FILE     = os.path.join(HERE, "../../data/_base_npy/fc1_weight.npy")
+OUTPUT_DIR   = os.path.join(HERE, "../../data/multi_img")
 
 N_IMAGES = 100
 
@@ -157,6 +161,11 @@ w2 = np.load(WEIGHT2_FILE)          # (16, 8, 3, 3) int8
 print(f"       shape={w2.shape}")
 assert w2.shape == (16, 8, 3, 3)
 
+print(f"[Load] {FC1_FILE}")
+fc1 = np.load(FC1_FILE).astype(np.int32)   # (10, 2304) int8 -> int32
+print(f"       shape={fc1.shape}")
+assert fc1.shape == (10, 2304)
+
 # ---------------------------------------------------------------------------
 # Forward (N_IMAGES 일괄)
 # ---------------------------------------------------------------------------
@@ -171,6 +180,13 @@ print(f"  fmap2 (Conv2 output): shape={fmap2.shape}, range=[{fmap2.min()}, {fmap
 
 fmap3 = maxpool_2x2(fmap2)          # (N, 16, 12, 12)
 print(f"  fmap3 (Maxpool output): shape={fmap3.shape}, range=[{fmap3.min()}, {fmap3.max()}]")
+
+# FC: maxpool(channel-major flatten) -> fc1 @ flat -> >>10 -> sat   (single 과 동일 연산)
+fc_flat  = fmap3.reshape(N_IMAGES, 16 * 144).astype(np.int32)   # (N,2304) col = c*144 + h*12+w
+fc_logit = fc_flat @ fc1.T                                      # (N,10) raw 24-bit logit
+fc_sat   = np.clip(fc_logit >> 10, -128, 127).astype(np.int8)
+print(f"  fc      (FC output)   : logit range=[{fc_logit.min()}, {fc_logit.max()}], "
+      f"pred[:5]={np.argmax(fc_sat, axis=1)[:5].tolist()}")
 
 # ---------------------------------------------------------------------------
 # Per-image hex 출력
@@ -212,5 +228,20 @@ with open(all_maxpool_path, "w") as f:
         for word in build_maxpool_compact(fmap3, img_idx):
             f.write(f"{word:032X}\n")
 print(f"  {all_maxpool_path}  ({N_IMAGES * 144} lines, 128-bit)")
+
+# fc golden: 각 이미지 10 logit (24-bit signed) + sat 예측 (8-bit)
+all_fc_logit_path = os.path.join(OUTPUT_DIR, "all_fc_logit.hex")
+with open(all_fc_logit_path, "w") as f:
+    for img_idx in range(N_IMAGES):
+        for oc in range(10):
+            f.write(f"{int(fc_logit[img_idx, oc]) & 0xFFFFFF:06X}\n")
+print(f"  {all_fc_logit_path}  ({N_IMAGES * 10} lines, 24-bit signed)")
+
+all_fc_output_path = os.path.join(OUTPUT_DIR, "all_fc_output.hex")
+with open(all_fc_output_path, "w") as f:
+    for img_idx in range(N_IMAGES):
+        for oc in range(10):
+            f.write(f"{int(fc_sat[img_idx, oc]) & 0xFF:02X}\n")
+print(f"  {all_fc_output_path}  ({N_IMAGES * 10} lines, 8-bit)")
 
 print(f"\n[Done]")

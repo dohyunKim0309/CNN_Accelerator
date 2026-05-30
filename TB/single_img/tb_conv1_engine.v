@@ -17,9 +17,15 @@
 //     done 시 c1c2 BMG bank 0 에 8 OC × 26×26 결과 완성.
 //////////////////////////////////////////////////////////////////////////////////
 
-`define CONV1_INPUT_HEX   "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_input.hex"
-`define CONV1_WEIGHT_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_weights_simd.hex"
-`define CONV1_EXPECTED_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_output_c1c2.hex"
+`ifdef __ICARUS__
+  `define CONV1_INPUT_HEX    "data/single_img/conv1_input.hex"
+  `define CONV1_WEIGHT_HEX   "data/weights_simd/conv1_weights_simd.hex"
+  `define CONV1_EXPECTED_HEX "data/single_img/conv1_output_c1c2.hex"
+`else
+  `define CONV1_INPUT_HEX   "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_input.hex"
+  `define CONV1_WEIGHT_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_weights_simd.hex"
+  `define CONV1_EXPECTED_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_output_c1c2.hex"
+`endif
 
 
 module tb_conv1_engine;

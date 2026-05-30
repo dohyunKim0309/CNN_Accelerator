@@ -97,6 +97,10 @@ module bram_c1_to_c2 (
     reg [63:0] pre;
     integer b;
 
+    // 실제 BMG 기본 초기값(0) 모사 — conv1 이 write 안 하는 padding 영역이 X 로 남지 않게.
+    integer mi_init;
+    initial for (mi_init = 0; mi_init < 2048; mi_init = mi_init + 1) mem[mi_init] = 64'd0;
+
     always @(posedge clka) begin
         if (ena) begin
             for (b = 0; b < 8; b = b + 1)

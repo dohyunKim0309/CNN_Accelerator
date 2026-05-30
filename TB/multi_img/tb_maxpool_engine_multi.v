@@ -23,8 +23,13 @@
 //     all_c2pool.hex  (100 × 576 lines × 128-bit packed)
 //////////////////////////////////////////////////////////////////////////////////
 
-`define ALL_C2POOL_HEX   "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_c2pool.hex"
-`define ALL_MAXPOOL_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_maxpool.hex"
+`ifdef __ICARUS__
+  `define ALL_C2POOL_HEX   "data/multi_img/all_c2pool.hex"
+  `define ALL_MAXPOOL_HEX  "data/multi_img/all_maxpool.hex"
+`else
+  `define ALL_C2POOL_HEX   "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_c2pool.hex"
+  `define ALL_MAXPOOL_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_maxpool.hex"
+`endif
 
 
 module tb_maxpool_engine_multi;

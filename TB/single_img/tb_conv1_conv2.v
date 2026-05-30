@@ -22,10 +22,17 @@
 //   상세 spec: docs/ip_spec/block_memory_generator.md
 //////////////////////////////////////////////////////////////////////////////////
 
-`define CONV1_INPUT_HEX     "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_input.hex"
-`define CONV1_WEIGHT_HEX    "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_weights_simd.hex"
-`define CONV2_WEIGHT_HEX    "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_weights_simd.hex"
-`define CONV2_EXPECTED_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_output_c2pool.hex"
+`ifdef __ICARUS__
+  `define CONV1_INPUT_HEX     "data/single_img/conv1_input.hex"
+  `define CONV1_WEIGHT_HEX    "data/weights_simd/conv1_weights_simd.hex"
+  `define CONV2_WEIGHT_HEX    "data/weights_simd/conv2_weights_simd.hex"
+  `define CONV2_EXPECTED_HEX  "data/single_img/conv2_output_c2pool.hex"
+`else
+  `define CONV1_INPUT_HEX     "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_input.hex"
+  `define CONV1_WEIGHT_HEX    "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_weights_simd.hex"
+  `define CONV2_WEIGHT_HEX    "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_weights_simd.hex"
+  `define CONV2_EXPECTED_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_output_c2pool.hex"
+`endif
 
 
 module tb_conv1_conv2;
@@ -35,8 +42,7 @@ module tb_conv1_conv2;
     //   Conv1/Conv2 모두 active-high rst (= ~rst_n) 사용 (시스템 통일).
     //==========================================================================
     reg clk = 1'b0;
-    reg rst_n = 1'b0;
-    wire rst = ~rst_n;
+    reg rst = 1'b1;        // active-high (시스템 통일)
     always #5 clk = ~clk;
 
     //==========================================================================
@@ -202,7 +208,7 @@ module tb_conv1_conv2;
     integer cycle_at_conv2_start, cycle_at_conv2_wdone;
 
     initial cycle_cnt = 0;
-    always @(posedge clk) if (rst_n) cycle_cnt <= cycle_cnt + 1;
+    always @(posedge clk) if (!rst) cycle_cnt <= cycle_cnt + 1;
 
     //==========================================================================
     // Tasks: init_* and pulse_*
@@ -316,10 +322,10 @@ module tb_conv1_conv2;
         $readmemh(`CONV2_EXPECTED_HEX,  expected_c2pool);
 
         // Reset
-        rst_n = 1'b0;
+        rst = 1'b1;
         repeat (10) @(posedge clk);
         @(negedge clk);
-        rst_n = 1'b1;
+        rst = 1'b0;
         $display("[TB] @ %0d : reset released", cycle_cnt);
 
         // Initialize all BMG (parallel-able but sequential 으로 단순화)

@@ -27,8 +27,13 @@
 //     poolfc 의 packed 128-bit word [pixel] 를 byte 별로 unpack 해서 비교
 //////////////////////////////////////////////////////////////////////////////////
 
-`define CONV2_OUT_HEX   "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_output_c2pool.hex"
-`define MAXPOOL_REF_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/maxpool_output.hex"
+`ifdef __ICARUS__
+  `define CONV2_OUT_HEX   "data/single_img/conv2_output_c2pool.hex"
+  `define MAXPOOL_REF_HEX "data/single_img/maxpool_output.hex"
+`else
+  `define CONV2_OUT_HEX   "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_output_c2pool.hex"
+  `define MAXPOOL_REF_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/maxpool_output.hex"
+`endif
 
 
 module tb_maxpool_engine;
@@ -214,10 +219,10 @@ module tb_maxpool_engine;
         cycle_at_prior = cycle_cnt;
         $display("[TB] @ cycle %0d : prior_wdone pulsed", cycle_at_prior);
 
-        // Wait done
-        @(posedge done);
+        // Wait wdone (poolfc write 완료 — 통과 표준: done legacy 대신 wdone 사용)
+        @(posedge wdone);
         cycle_at_done = cycle_cnt;
-        $display("[TB] @ cycle %0d : done received (compute %0d cycles)",
+        $display("[TB] @ cycle %0d : wdone received (compute %0d cycles)",
                  cycle_at_done, cycle_at_done - cycle_at_prior);
 
         // Settle for poolfc mem write

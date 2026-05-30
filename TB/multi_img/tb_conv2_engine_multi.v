@@ -18,9 +18,15 @@
 //   상세: docs/ip_spec/block_memory_generator.md
 //////////////////////////////////////////////////////////////////////////////////
 
-`define CONV1_ALL_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_c1c2.hex"
-`define CONV2_ALL_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_c2pool.hex"
-`define WEIGHT_HEX     "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_weights_simd.hex"
+`ifdef __ICARUS__
+  `define CONV1_ALL_HEX  "data/multi_img/all_c1c2.hex"
+  `define CONV2_ALL_HEX  "data/multi_img/all_c2pool.hex"
+  `define WEIGHT_HEX     "data/weights_simd/conv2_weights_simd.hex"
+`else
+  `define CONV1_ALL_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_c1c2.hex"
+  `define CONV2_ALL_HEX  "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_c2pool.hex"
+  `define WEIGHT_HEX     "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_weights_simd.hex"
+`endif
 
 
 //////////////////////////////////////////////////////////////////////////////////
@@ -31,11 +37,12 @@ module tb_conv2_engine_multi;
     parameter N_IMAGES = 100;
 
     //==========================================================================
-    // Clock / reset (180 MHz)
+    // Clock / reset (100 MHz)
     //==========================================================================
+    parameter CLK_PERIOD = 10;
     reg clk = 1'b0;
     reg rst = 1'b1;
-    always #2.78 clk = ~clk;
+    always #(CLK_PERIOD/2) clk = ~clk;
 
     //==========================================================================
     // DUT signals

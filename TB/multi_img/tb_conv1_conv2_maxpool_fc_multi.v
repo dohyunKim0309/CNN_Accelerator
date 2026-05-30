@@ -20,27 +20,35 @@
 //   ping-pong bank: 모든 engine 내부 toggle FF 가 관리 (TB driving 없음).
 //     poolfc 는 dumb 2-bank behavioral mem (maxpool write Port A + FC read Port B).
 //
-//   ★ WEIGHT / LABEL (TODO):
-//     weight 생성 코드가 수정 중이므로 가중치/정답 label 은 아직 미연결.
-//     - CHECK_LABEL=0 (기본): weight hex 가 없어도(0-weight) 동작 — handshake chain,
-//       bank ping-pong, FC 까지 N_IMAGES 가 timeout 없이 흐르는지(class_valid N회)만 검증.
-//     - CHECK_LABEL=1 : weight hex + LABEL_HEX 확정 후 활성화 → class_idx vs label 비교.
-//     weight 완료 시 수정할 곳: `*_WEIGHT_HEX / `FCW_HEX / `LABEL_HEX 경로,
-//                              CHECK_LABEL=1, (필요시) load_fc_weights 의 unpack 포맷.
+//   검증 (CHECK_LABEL):
+//     1 (기본): logit bit-exact (fc.logit_reg vs all_fc_logit.hex) + class_idx(argmax).
+//     0       : weight 없이 handshake/bank 흐름만 검증 (class_valid N회).
 //
-//   필요 BMG IP (Vivado):
-//     bram_input, conv1_weight_bram, bram_c1_to_c2, conv2_weight_bram,
-//     bram_c2_to_pool, fc_weight_bram     (poolfc 는 본 TB 의 behavioral mem)
+//   ★ Vivado 이관 체크리스트:
+//     1. TB/models/dsp48e1_model.v, TB/models/bmg_sim_models.v 를 시뮬 소스에서 제외
+//        (실제 BMG IP + DSP48E1 unisim 과 module 중복 정의 충돌).
+//     2. hex 경로는 아래 `ifdef __ICARUS__ 로 자동 분기 — `else(Vivado) 블록 경로를
+//        VM 실제 위치로 조정하고, data/ 의 hex 들을 VM 으로 복사/공유.
+//     3. 필요 BMG IP: bram_input, conv1_weight_bram, bram_c1_to_c2, conv2_weight_bram,
+//        bram_c2_to_pool, fc_weight_bram.  (poolfc 는 본 TB 의 behavioral mem — IP 불필요)
 //////////////////////////////////////////////////////////////////////////////////
 
-`define ALL_INPUT_HEX    "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_input.hex"
-
-// --- WEIGHT / LABEL (TODO: weight 생성 완료 후 경로 확정) ------------------------
-`define CONV1_WEIGHT_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_weights_simd.hex"
-`define CONV2_WEIGHT_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_weights_simd.hex"
-`define FCW_HEX          "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/fc_weights_simd.hex"
-`define LABEL_HEX        "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_labels.hex"
-// --------------------------------------------------------------------------------
+//   경로: iverilog(__ICARUS__ 자동 정의)=로컬 상대(cwd=프로젝트 루트),
+//         Vivado=Windows 절대경로. Vivado VM 의 실제 data 위치에 맞게 `else 조정.
+`ifdef __ICARUS__
+  `define ALL_INPUT_HEX    "data/multi_img/all_input.hex"
+  `define CONV1_WEIGHT_HEX "data/weights_simd/conv1_weights_simd.hex"
+  `define CONV2_WEIGHT_HEX "data/weights_simd/conv2_weights_simd.hex"
+  `define FCW_HEX          "data/weights_simd/fc_weights_simd.hex"
+  `define FC_LOGIT_HEX     "data/multi_img/all_fc_logit.hex"
+`else
+  // Vivado (Windows) — 기존 단위 TB 와 동일 베이스. VM 실제 경로로 조정할 것.
+  `define ALL_INPUT_HEX    "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_input.hex"
+  `define CONV1_WEIGHT_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_weights_simd.hex"
+  `define CONV2_WEIGHT_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_weights_simd.hex"
+  `define FCW_HEX          "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/fc_weights_simd.hex"
+  `define FC_LOGIT_HEX     "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_fc_logit.hex"
+`endif
 
 
 module tb_conv1_conv2_maxpool_fc_multi;
@@ -48,9 +56,9 @@ module tb_conv1_conv2_maxpool_fc_multi;
     parameter N_IMAGES   = 40;
     parameter ACC_W      = 24;
 
-    // ★ weight + label 이 준비되면 1 로 바꿔 class_idx 비교를 활성화.
-    //   0 일 때는 handshake/bank/흐름(class_valid N회)만 검증한다.
-    parameter CHECK_LABEL = 0;
+    // weight + expected logit 준비됨 → class_idx + logit bit-exact 검증 활성화.
+    //   0 으로 두면 handshake/bank/흐름(class_valid N회)만 검증.
+    parameter CHECK_LABEL = 1;
 
     //==========================================================================
     // Clock / reset (100 MHz, all-DUT active-high rst 통일)
@@ -322,7 +330,7 @@ module tb_conv1_conv2_maxpool_fc_multi;
     reg [31:0]  weight1_mem     [0:35];
     reg [31:0]  weight2_mem     [0:575];
     reg [31:0]  fc_weight_simd  [0:11519];        // FC SIMD-packed weight (720*16 line)
-    reg [3:0]   expected_label  [0:N_IMAGES-1];   // class label (CHECK_LABEL=1 시 사용)
+    reg signed [23:0] exp_logit [0:N_IMAGES*10-1]; // expected logit (argmax→class), CHECK_LABEL=1
 
     //==========================================================================
     // Statistics
@@ -459,7 +467,7 @@ module tb_conv1_conv2_maxpool_fc_multi;
         $readmemh(`CONV2_WEIGHT_HEX, weight2_mem);
         $readmemh(`FCW_HEX,          fc_weight_simd);
         if (CHECK_LABEL)
-            $readmemh(`LABEL_HEX,    expected_label);
+            $readmemh(`FC_LOGIT_HEX, exp_logit);
         // ---------------------------------------------------------------------
 
         for (i_main = 0; i_main < N_IMAGES; i_main = i_main + 1) begin
@@ -539,7 +547,26 @@ module tb_conv1_conv2_maxpool_fc_multi;
     // PROCESS 3: FC result collector — @class_valid 마다 class_idx 캡처
     //   fc.rdone → maxpool.succ_rdone 은 direct wire 라 TB pulse 불필요.
     //==========================================================================
-    integer i_fc;
+    // expected logit 10개에서 argmax (fc_argmax 와 동일 규칙: strict >, 첫 최댓값)
+    function [3:0] exp_argmax;
+        input integer base;
+        integer j;
+        reg signed [23:0] best;
+        reg [3:0] bi;
+        begin
+            best = exp_logit[base];
+            bi   = 4'd0;
+            for (j = 1; j < 10; j = j + 1)
+                if (exp_logit[base + j] > best) begin
+                    best = exp_logit[base + j];
+                    bi   = j[3:0];
+                end
+            exp_argmax = bi;
+        end
+    endfunction
+
+    integer i_fc, j_fc, logit_mm;
+    reg [3:0] exp_cls;
     initial begin : fc_result_process
         wait (rst == 1'b0);
 
@@ -550,13 +577,21 @@ module tb_conv1_conv2_maxpool_fc_multi;
             results_seen          = results_seen + 1;
 
             if (CHECK_LABEL) begin
-                if (class_idx == expected_label[i_fc]) begin
+                // 1) logit bit-exact : fc 내부 logit_reg 10개 vs expected
+                logit_mm = 0;
+                for (j_fc = 0; j_fc < 10; j_fc = j_fc + 1)
+                    if (fc.logit_reg[j_fc][23:0] !== exp_logit[i_fc*10 + j_fc])
+                        logit_mm = logit_mm + 1;
+                // 2) class_idx (= argmax of expected logit)
+                exp_cls = exp_argmax(i_fc*10);
+
+                if (logit_mm == 0 && class_idx == exp_cls) begin
                     images_pass = images_pass + 1;
                     $display("[TB] img %3d : PASS  class=%0d  @cyc %0d",
                              i_fc, class_idx, cycle_at_result[i_fc]);
                 end else begin
-                    $display("[TB] img %3d : FAIL  class=%0d exp=%0d  @cyc %0d",
-                             i_fc, class_idx, expected_label[i_fc], cycle_at_result[i_fc]);
+                    $display("[TB] img %3d : FAIL  class=%0d exp=%0d  logit_mm=%0d/10  @cyc %0d",
+                             i_fc, class_idx, exp_cls, logit_mm, cycle_at_result[i_fc]);
                 end
             end else begin
                 $display("[TB] img %3d : class=%0d  @cyc %0d  (label check off)",

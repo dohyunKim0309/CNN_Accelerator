@@ -1,21 +1,305 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: cnn_accelerator
-//   - Top IP for Team Assignment 2 (CNN_Accelerator)
-//   - Contains:
+// Module Name: cnn_accelerator  (PL core, Team Assignment 2)
+//
+//   Pipeline (검증된 통합 TB 배선 그대로):
+//     Input BRAM → Conv1 → c1c2 → Conv2 → c2pool → Maxpool → poolfc → FC → class
+//
+//   제어 인터페이스 (CSR_AXI ↔ PL):
+//     resetn    : 외부 보드 reset 버튼 (active-low). 내부 rst = ~resetn (active-high).
+//     enable    : 1 이면 가동 (trigger qualify). 0 이면 start/img_ready 무시.
+//     start     : 1-cycle pulse (CSR 변환). conv2 LOAD_WEIGHTS 진입 (weight 적재 1회).
+//     img_ready : 1-cycle pulse. PS 가 Input BRAM 에 새 image write 완료 알림
+//                 → conv1 prior_wdone (image-by-image trigger).
+//     result    : 4-bit, 현재 완료 image 의 분류 결과 (class_valid 시 latch).
+//     img_done  : 1-cycle pulse, image 처리 완료 (= fc.class_valid 1-cycle 지연).
+//     input_consumed : 1-cycle pulse, conv1 이 input BRAM read 완료 (= conv1_rdone).
+//                      PS 가 같은 bank 에 다음 image 적재 가능 시점 (overlap backpressure).
+//
+//   ping-pong bank: 모든 engine 내부 toggle FF 가 관리.
+//     Input BRAM 2-bank: PS 가 write 하는 bank 와 conv1 internal input_bank_sel 이
+//     image index LSB 로 자동 sync (TB 검증과 동일 전제).
+//
+//   ★ 필요한 BMG IP (Vivado, 전부 본 모듈 내부 인스턴스):
+//     bram_input        (PS write Port A 32b×512 / conv1 read Port B 8b×2048, L=1)
+//     conv1_weight_bram (PS write Port A 32b×64 / conv1 read Port B, L=2, regceb)
+//     bram_c1_to_c2     (conv1 write / conv2 read, 64b×2048, byte-write, L=2)
+//     bram_c2_to_pool   (conv2 write / maxpool read, 128b×2048, L=1)
+//     bram_pool_to_fc   (maxpool write / fc read, 128b×512, L=1)   ★ 신규 IP
+//     conv2_weight_bram (conv2_engine 내부) / fc_weight_bram (fc_engine 내부)
+//   PS-write BMG 4종(Input/Conv1w/Conv2w/FCw)의 Port A 는 외부 포트로 노출 →
+//   block design 에서 AXI BRAM Controller 연결.
 //////////////////////////////////////////////////////////////////////////////////
 
-module cnn_accelerator(
+module cnn_accelerator (
     input  wire        clk,
-    input  wire        resetn
+    input  wire        resetn,        // 외부 보드 reset 버튼 (active-low)
 
-    // ===== Control / Status =====
+    //==========================================================================
+    // CSR_AXI 제어/상태
+    //==========================================================================
+    input  wire        enable,        // 가동 (trigger qualify)
+    input  wire        start,         // 1-cycle pulse: weight load + timer 시작
+    input  wire        img_ready,     // 1-cycle pulse: 새 image 준비 → conv1 trigger
+    output wire [3:0]  result,        // 분류 결과 digit (0~9)
+    output wire        img_done,      // image 처리 완료 pulse (fc.class_valid 지연)
+    output wire        input_consumed,// conv1 input read 완료 (= conv1_rdone) — PS overlap backpressure
 
-    // ===== BRAM1 Port B (external, to AXI BRAM Controller #1 -> PS write) =====
+    //==========================================================================
+    // Input BRAM Port A  (PS write via AXI BRAM Ctrl)
+    //==========================================================================
+    input  wire        in_ena,
+    input  wire        in_wea,
+    input  wire [8:0]  in_addra,
+    input  wire [31:0] in_dina,
 
-    // ===== BRAM2 Port B (external, to AXI BRAM Controller #2 -> PS read) =====
+    //==========================================================================
+    // Conv1 weight BRAM Port A  (PS write)
+    //==========================================================================
+    input  wire        w1_ena,
+    input  wire        w1_wea,
+    input  wire [5:0]  w1_addra,
+    input  wire [31:0] w1_dina,
+
+    //==========================================================================
+    // Conv2 weight BRAM Port A  (PS write, conv2_engine 내부 BMG)
+    //==========================================================================
+    input  wire        c2w_ena,
+    input  wire [9:0]  c2w_addra,
+    input  wire [31:0] c2w_dina,
+
+    //==========================================================================
+    // FC weight BRAM Port A  (PS write, fc_engine 내부 BMG)
+    //==========================================================================
+    input  wire        fcw_ena,
+    input  wire [9:0]  fcw_addra,
+    input  wire [255:0] fcw_dina
 );
-    wire reset = ~resetn;
 
+    //==========================================================================
+    // Reset (active-high 내부 통일)
+    //==========================================================================
+    wire rst = ~resetn;
+
+    //==========================================================================
+    // Trigger (enable 으로 qualify)
+    //   start / img_ready 는 CSR 가 만든 1-cycle pulse.
+    //==========================================================================
+    wire conv2_start_q = start     & enable;   // weight load 1회 진입
+    wire conv1_prior   = img_ready & enable;   // image-by-image trigger
+
+    //==========================================================================
+    // Handshake chain (direct wire — 통합 TB 검증 배선)
+    //==========================================================================
+    wire conv1_done;
+    wire conv1_rdone, conv1_wdone;
+    wire conv2_rdone, conv2_wdone;
+    wire maxpool_done;
+    wire maxpool_rdone, maxpool_wdone;
+    wire fc_rdone;
+    wire [3:0] class_idx;
+    wire       class_valid;
+
+    //==========================================================================
+    // BMG nets
+    //==========================================================================
+    // Input BRAM Port B (conv1 read)
+    wire [10:0]  in_addrb;
+    wire         in_enb;
+    wire signed [7:0] in_doutb;
+
+    // Conv1 weight Port B (conv1 read)
+    wire [5:0]   w1_addrb;
+    wire         w1_enb;
+    wire [31:0]  w1_doutb;
+
+    // c1c2 (conv1 write A / conv2 read B)
+    wire         c1c2_we_a;
+    wire [7:0]   c1c2_wea_a;
+    wire [10:0]  c1c2_addr_a;
+    wire [63:0]  c1c2_din_a;
+    wire         c1c2_re_b;
+    wire [10:0]  c1c2_addr_b;
+    wire [63:0]  c1c2_doutb_b;
+
+    // c2pool (conv2 write A / maxpool read B)
+    wire         c2pool_we_a;
+    wire [10:0]  c2pool_addr_a;
+    wire [127:0] c2pool_din_a;
+    wire [10:0]  maxpool_c2pool_rd_addr;   // 11-bit physical {input_bank_sel, local}
+    wire         c2pool_re_b;
+    wire [127:0] c2pool_doutb_b;
+
+    // poolfc (maxpool write A / fc read B)
+    wire [8:0]   poolfc_wr_addr;
+    wire         poolfc_wr_en;
+    wire [127:0] poolfc_wr_data;
+    wire         fc_poolfc_re;
+    wire [8:0]   fc_poolfc_addr;
+    wire [127:0] fc_poolfc_dout;
+
+    //==========================================================================
+    // BMG instances (PS-write 4종 + inter-layer 3종 = 본 모듈 내부)
+    //==========================================================================
+    bram_input in_bmg (
+        .clka  (clk), .ena (in_ena), .wea (in_wea),
+        .addra (in_addra), .dina (in_dina),
+        .clkb  (clk), .enb (in_enb),
+        .addrb (in_addrb), .doutb (in_doutb)
+    );
+
+    conv1_weight_bram w1_bmg (
+        .clka  (clk), .ena (w1_ena), .wea (w1_wea),
+        .addra (w1_addra), .dina (w1_dina),
+        .clkb  (clk), .enb (w1_enb),
+        .addrb (w1_addrb), .doutb (w1_doutb),
+        .regceb(1'b1)
+    );
+
+    bram_c1_to_c2 c1c2_bmg (
+        .clka  (clk), .ena (c1c2_we_a), .wea (c1c2_wea_a),
+        .addra (c1c2_addr_a), .dina (c1c2_din_a),
+        .clkb  (clk), .enb (c1c2_re_b),
+        .addrb (c1c2_addr_b), .doutb (c1c2_doutb_b)
+    );
+
+    bram_c2_to_pool c2pool_bmg (
+        .clka  (clk), .ena (c2pool_we_a), .wea (c2pool_we_a),
+        .addra (c2pool_addr_a), .dina (c2pool_din_a),
+        .clkb  (clk), .enb (c2pool_re_b),
+        .addrb (maxpool_c2pool_rd_addr),
+        .doutb (c2pool_doutb_b)
+    );
+
+    // poolfc: maxpool write(Port A, physical {output_bank_sel,addr}) / fc read(Port B)
+    bram_pool_to_fc poolfc_bmg (
+        .clka  (clk), .ena (poolfc_wr_en), .wea (poolfc_wr_en),
+        .addra (poolfc_wr_addr), .dina (poolfc_wr_data),
+        .clkb  (clk), .enb (fc_poolfc_re),
+        .addrb (fc_poolfc_addr), .doutb (fc_poolfc_dout)
+    );
+
+    //==========================================================================
+    // DUT 1: Conv1
+    //==========================================================================
+    conv1_engine conv1 (
+        .clk          (clk),
+        .rst          (rst),
+        .start        (1'b0),                 // legacy (사용 X)
+        .done         (conv1_done),
+
+        .prior_wdone  (conv1_prior),          // image trigger (img_ready & enable)
+        .succ_rdone   (conv2_rdone),
+        .rdone        (conv1_rdone),
+        .wdone        (conv1_wdone),
+
+        .in_bram_addr (in_addrb),
+        .in_bram_en   (in_enb),
+        .in_bram_dout (in_doutb),
+
+        .w_bram_addr  (w1_addrb),
+        .w_bram_en    (w1_enb),
+        .w_bram_dout  (w1_doutb),
+
+        .c1c2_we      (c1c2_we_a),
+        .c1c2_wea     (c1c2_wea_a),
+        .c1c2_addr    (c1c2_addr_a),
+        .c1c2_din     (c1c2_din_a)
+    );
+
+    //==========================================================================
+    // DUT 2: Conv2  (weight BMG 내부, Port A 외부 패스through)
+    //==========================================================================
+    conv2_engine conv2 (
+        .clk         (clk),
+        .rst         (rst),
+        .start       (conv2_start_q),         // LOAD_WEIGHTS 1회
+
+        .c2w_ena     (c2w_ena),
+        .c2w_addra   (c2w_addra),
+        .c2w_dina    (c2w_dina),
+
+        .c1c2_re     (c1c2_re_b),
+        .c1c2_addr   (c1c2_addr_b),
+        .c1c2_dout   (c1c2_doutb_b),
+
+        .c2pool_we   (c2pool_we_a),
+        .c2pool_addr (c2pool_addr_a),
+        .c2pool_din  (c2pool_din_a),
+
+        .prior_wdone (conv1_wdone),
+        .rdone       (conv2_rdone),
+        .succ_rdone  (maxpool_rdone),
+        .wdone       (conv2_wdone)
+    );
+
+    //==========================================================================
+    // DUT 3: Maxpool
+    //==========================================================================
+    maxpool_engine maxpool (
+        .clk             (clk),
+        .rst             (rst),
+        .start           (1'b0),
+        .done            (maxpool_done),
+
+        .prior_wdone     (conv2_wdone),
+        .succ_rdone      (fc_rdone),
+        .rdone           (maxpool_rdone),
+        .wdone           (maxpool_wdone),
+
+        .c2pool_rd_addr  (maxpool_c2pool_rd_addr),
+        .c2pool_rd_en    (c2pool_re_b),
+        .c2pool_rd_data  (c2pool_doutb_b),
+
+        .poolfc_wr_addr  (poolfc_wr_addr),
+        .poolfc_wr_en    (poolfc_wr_en),
+        .poolfc_wr_data  (poolfc_wr_data)
+    );
+
+    //==========================================================================
+    // DUT 4: FC (terminal, weight BMG 내부)
+    //==========================================================================
+    fc_engine #(.ACC_W(24)) fc (
+        .clk         (clk),
+        .rst         (rst),
+        .start       (1'b0),                  // prior_wdone 트리거 (start 미사용)
+
+        .fcw_ena     (fcw_ena),
+        .fcw_addra   (fcw_addra),
+        .fcw_dina    (fcw_dina),
+
+        .poolfc_re   (fc_poolfc_re),
+        .poolfc_addr (fc_poolfc_addr),
+        .poolfc_dout (fc_poolfc_dout),
+
+        .prior_wdone (maxpool_wdone),
+        .rdone       (fc_rdone),
+
+        .class_idx   (class_idx),
+        .class_valid (class_valid)
+    );
+
+    //==========================================================================
+    // Result / img_done  (class_valid 시 latch → CSR 가 안정적으로 read)
+    //==========================================================================
+    reg [3:0] result_r;
+    reg       img_done_r;
+    always @(posedge clk) begin
+        if (rst) begin
+            result_r   <= 4'd0;
+            img_done_r <= 1'b0;
+        end else begin
+            img_done_r <= class_valid;
+            if (class_valid)
+                result_r <= class_idx;
+        end
+    end
+
+    assign result   = result_r;
+    assign img_done = img_done_r;
+
+    // input-consumed: conv1 이 input BRAM read 를 끝낸 시점(RUN2 끝) 의 1-cycle pulse.
+    //   PS 가 같은 bank 에 다음 image(i+2) 를 안전하게 write 할 수 있는 backpressure 신호.
+    assign input_consumed = conv1_rdone;
 
 endmodule

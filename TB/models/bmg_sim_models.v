@@ -191,3 +191,27 @@ module fc_weight_bram (
 
     always @(posedge clkb) if (enb) doutb <= mem[addrb];
 endmodule
+
+
+// ===========================================================================
+// bram_pool_to_fc : 128b × 512, L=1 (maxpool write Port A / fc read Port B)
+//   cnn_accelerator 의 inter-layer poolfc 버퍼.
+// ===========================================================================
+module bram_pool_to_fc (
+    input  wire         clka,
+    input  wire         ena,
+    input  wire         wea,
+    input  wire [8:0]   addra,
+    input  wire [127:0] dina,
+
+    input  wire         clkb,
+    input  wire         enb,
+    input  wire [8:0]   addrb,
+    output reg  [127:0] doutb
+);
+    reg [127:0] mem [0:511];
+
+    always @(posedge clka) if (ena && wea) mem[addra] <= dina;
+
+    always @(posedge clkb) if (enb) doutb <= mem[addrb];
+endmodule

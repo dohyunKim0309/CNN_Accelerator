@@ -10,7 +10,11 @@
       "Bash(mkdir -p C:/Users/mongd/git_final_project/CNN_Accelerator/RTL_single/maxpool)",
       "Bash(mkdir -p C:/Users/mongd/git_final_project/CNN_Accelerator/RTL_single/fc)",
       "Bash(iverilog -g2005 -Wall TB_single/models/dsp48e1_model.v TB_single/models/bmg_sim_models.v RTL_single/core/pe_cell.v RTL_single/core/line_buffer.v RTL_single/core/window_register.v RTL_single/core/truncate_relu.v RTL_single/conv1/conv1_adder_tree.v RTL_single/conv1/conv1_weight_loader.v RTL_single/conv1/conv1_fsm.v RTL_single/conv1/conv1_engine.v RTL_single/conv2/kcol_accumulator.v RTL_single/conv2/krow_ic_adder_tree.v RTL_single/conv2/weight_loader.v RTL_single/conv2/conv2_fsm.v RTL_single/conv2/conv2_engine.v RTL_single/maxpool/max_compare_tree.v RTL_single/maxpool/maxpool_fsm.v RTL_single/maxpool/maxpool_engine.v RTL_single/fc/fc_pe_array.v RTL_single/fc/fc_adder_tree.v RTL_single/fc/fc_accumulator.v RTL_single/fc/fc_argmax.v RTL_single/fc/fc_fsm.v RTL_single/fc/fc_engine.v RTL_single/cnn_accelerator.v TB_single/tb_cnn_accelerator.v -o sim_single)",
-      "Bash(echo \"Exit code: $?\")"
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(iverilog -g2005 -o /tmp/sim_single TB_single/models/dsp48e1_model.v TB_single/models/bmg_sim_models.v RTL_single/core/pe_cell.v RTL_single/core/line_buffer.v RTL_single/core/window_register.v RTL_single/core/truncate_relu.v RTL_single/conv1/conv1_adder_tree.v RTL_single/conv1/conv1_weight_loader.v RTL_single/conv1/conv1_fsm.v RTL_single/conv1/conv1_engine.v RTL_single/conv2/kcol_accumulator.v RTL_single/conv2/krow_ic_adder_tree.v RTL_single/conv2/weight_loader.v RTL_single/conv2/conv2_fsm.v RTL_single/conv2/conv2_engine.v RTL_single/maxpool/max_compare_tree.v RTL_single/maxpool/maxpool_fsm.v RTL_single/maxpool/maxpool_engine.v RTL_single/fc/fc_pe_array.v RTL_single/fc/fc_adder_tree.v RTL_single/fc/fc_accumulator.v RTL_single/fc/fc_argmax.v RTL_single/fc/fc_fsm.v RTL_single/fc/fc_engine.v RTL_single/cnn_accelerator.v TB_single/tb_cnn_accelerator.v)",
+      "Bash(/tmp/sim_single)",
+      "Bash(vvp /tmp/sim_single)",
+      "Bash(iverilog -g2005 -o /tmp/sim_csr RTL_single/control_status_register/csr_axi_slave_lite_v1_0_csr.v RTL_single/control_status_register/csr_axi.v)"
     ]
   }
 }

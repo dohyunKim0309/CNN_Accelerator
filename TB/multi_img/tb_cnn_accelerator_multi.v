@@ -20,13 +20,13 @@
 `ifdef __ICARUS__
   `define ALL_INPUT_HEX    "data/multi_img/all_input.hex"
   `define CONV1_WEIGHT_HEX "data/weights_simd/conv1_weights_simd.hex"
-  `define CONV2_WEIGHT_HEX "data/weights_simd/conv2_weights_simd.hex"
+  `define CONV2_WEIGHT_HEX "data/winograd/winograd_u.hex"     // ★ winograd: pre-transformed U
   `define FCW_HEX          "data/weights_simd/fc_weights_simd.hex"
   `define FC_LOGIT_HEX     "data/multi_img/all_fc_logit.hex"
 `else
   `define ALL_INPUT_HEX    "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_input.hex"
   `define CONV1_WEIGHT_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv1_weights_simd.hex"
-  `define CONV2_WEIGHT_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/conv2_weights_simd.hex"
+  `define CONV2_WEIGHT_HEX "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/winograd/winograd_u.hex"
   `define FCW_HEX          "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/fc_weights_simd.hex"
   `define FC_LOGIT_HEX     "C:/Users/gimdohyeon/CNN_Accelerator_Core/CNN_Accelerator_Core_data/image_by_image/multi_img/all_fc_logit.hex"
 `endif
@@ -34,7 +34,7 @@
 
 module tb_cnn_accelerator_multi;
 
-    parameter N_IMAGES    = 40;
+    parameter N_IMAGES    = 40;      // user gate (data 100 까지 지원)
     parameter ACC_W       = 24;
     parameter CHECK_LABEL = 1;
 
@@ -77,7 +77,7 @@ module tb_cnn_accelerator_multi;
 
     reg         c2w_ena   = 1'b0;
     reg  [3:0]  c2w_wea   = 4'd0;         // byte-write (AXI WSTRB)
-    reg  [9:0]  c2w_addra = 10'd0;
+    reg  [12:0] c2w_addra = 13'd0;        // ★ winograd: 8192-deep (5888 used)
     reg  [31:0] c2w_dina  = 32'd0;
 
     reg          fcw_ena   = 1'b0;
@@ -110,7 +110,7 @@ module tb_cnn_accelerator_multi;
     //==========================================================================
     reg [7:0]   input_data     [0:N_IMAGES*784-1];
     reg [31:0]  weight1_mem    [0:35];
-    reg [31:0]  weight2_mem    [0:575];
+    reg [31:0]  weight2_mem    [0:5887];     // ★ winograd pre-transformed U (5888 word)
     reg [31:0]  fc_weight_simd [0:11519];
     reg signed [23:0] exp_logit [0:N_IMAGES*10-1];
 
@@ -150,13 +150,13 @@ module tb_cnn_accelerator_multi;
         end
     endtask
 
-    task load_w2;
+    task load_w2;     // ★ winograd: pre-transformed U operand 5888 word → c2w_* Port A
         integer wi;
         begin
-            for (wi = 0; wi < 576; wi = wi + 1) begin
+            for (wi = 0; wi < 5888; wi = wi + 1) begin
                 @(negedge clk);
                 c2w_ena = 1'b1; c2w_wea = 4'hF;
-                c2w_addra = wi[9:0]; c2w_dina = weight2_mem[wi];
+                c2w_addra = wi[12:0]; c2w_dina = weight2_mem[wi];
             end
             @(negedge clk); c2w_ena = 1'b0; c2w_wea = 4'd0;
         end

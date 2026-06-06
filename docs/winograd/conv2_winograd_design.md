@@ -9,7 +9,7 @@
 ## 0. 한 줄 요약
 
 8 IC×26×26 INT8 → 16 OC×24×24 INT8 conv (3×3 stride1 no-pad) 을, **6×6 tile(stride4)** 단위로
-`V=Bᵀ·d·B`(입력변환, 곱셈기0) → `M=Σ_IC U⊙V`(184 DSP) → `Y16=Aᵀ·M·A`(출력변환, 곱셈기0) → `sat(Y16>>14)+ReLU` 로 계산. 곱셈 144→46(3.13×), conv2 1798→~1324 cyc(1.36×), DSP 192→184.
+`V=Bᵀ·d·B`(입력변환, 곱셈기0) → `M=Σ_IC U⊙V`(184 DSP) → `Y16=Aᵀ·M·A`(출력변환, 곱셈기0) → `sat(Y16>>14)+ReLU` 로 계산. 곱셈 144→46(3.13×), conv2 1798→**1336 cyc/img**(1.35×, 측정; 설계 추정은 ~1324였음), DSP 192→184.
 
 ---
 
@@ -28,14 +28,14 @@
 
 | 포트 | conv2 (현재) | conv2_winograd |
 |---|---|---|
-| weight Port A | `c2w_ena/wea[3:0]/addra[9:0]/dina[31:0]` (576×32b SIMD) | `uw_ena/wea/addra/dina` — **U weight BMG** (아래 §2) |
-| 내부 weight 로딩 | `weight_loader` → pe broadcast | **U 직접 read** (pre-pack, broadcast 불필요 — §4) |
+| weight | `c2w_ena/wea[3:0]/addra[9:0]/dina[31:0]` (576×32b SIMD, PS write) | `c2w_ena/wea[3:0]/addra[12:0]/dina[31:0]` (8192×32b, **pre-transformed U** 5888 word PS write → loader → wmem, §2) |
+| 내부 weight 로딩 | `weight_loader` → pe broadcast | **ROM 조합 read** (broadcast/loader 불필요 — §2,§4) |
 
-→ `cnn_accelerator.v` 에서 conv2 인스턴스를 conv2_winograd 로 교체 + weight BMG(conv2_weight_bram→u_weight_bram) 교체. 나머지 배선 동일.
+→ `cnn_accelerator.v` 에서 conv2 인스턴스를 conv2_winograd 로 교체. **weight 는 ROM 내장** → conv2_weight_bram IP·c2w AXI·firmware conv2 weight write 제거(미완 시 부팅 AXI hang 위험 — §9). 나머지 c1c2/c2pool/handshake 배선 동일.
 
 ---
 
-## 2. Weight 포맷 — U 사전계산 (pre-pack)
+## 2. Weight 포맷 — PS-writable pre-transformed U (★2026-06-05 as-built, ROM 에서 전환)
 
 `U = G·g·Gᵀ` 는 g 고정·G 정수라 **오프라인 정수 사전계산**(반올림 없음). golden `_prepare_weight` 와 동일.
 
@@ -43,16 +43,15 @@
 for OC in 0..15, IC in 0..7:
     g = w2[OC,IC]                 # 3×3 INT8
     U = G @ g @ G.T              # 6×6 complex int (G 스케일 안 함)
-    U_re[OC,IC] = U.real         # 6×6, |·| ≤ 9·127 ≈ 1143 → INT12 signed
-    U_im[OC,IC] = U.imag         # 6×6, INT12 signed
+    U_re/U_im[OC,IC]             # 6×6, |·| ≤ 9·127 ≈ 1143
 ```
 
-- 저장: 16 OC × 8 IC × 36 × 2(re,im) × 12-bit ≈ **18 KB** (BRAM 1개).
-- **U sparsity**: G_IM 이 i,−i 행에만 → U 의 많은 (p,q) 가 **real-only**(im=0). 이게 46<72(36×2) 곱셈의 근거(§5).
-- 산출물: `scripts/weights/winograd_u_pack.py` → `data/weights_winograd/u_weights.hex`(TB) + `.h`(vitis). **bit-layout 은 golden U 와 1:1**.
-- firmware: 새 헤더 direct write (SIMD 변환 없음, conv1/fc 와 동일 패턴).
-
-> ★ 결정 포인트: U 를 어떤 word 폭으로 packing 할지(예: real/imag 12b 쌍 → 24b/element, 36 element/(OC,IC)). DSP array 가 cycle 당 IC=4×46 mul 을 쓰므로 weight read 대역과 정렬 필요(§4.3). pre-pack 스크립트가 RTL read 순서에 맞춰 배열.
+- **★채택 = PS-writable pre-transformed U** (초기 baked ROM 에서 **LUT fit 위해 전환**: 상수 ROM 이 LUT-heavy → 100T 63.4K LUT 초과 → BRAM 으로 이전). `winograd_gen.py` 의 `emit_weight_hex` 가 `data/winograd/winograd_u.hex`(TB)·`conv2_winograd_weights.h`(firmware) 를 emit (5888 word = 32 entry × 184 op, 1 op/word, **UW=12**). operand layout = lane-major 4 lane × 46 = [16 real `U_re`] + [10 cmul 의 `(a, b−a, a+b)`].
+- **경로 = 기존 conv2 방식**: PS 가 `wino_weight_bram`(32b×8192 SDP BMG) Port A 에 write → engine 내부 `wino_weight_loader` 가 첫 `start` 후 `LOAD_WEIGHTS`(~5888+drain cyc)에서 wide `wmem`(32 entry×184 op, `ram_style=block`) 으로 조립. compute read = `wmem[compute_cnt]` (L=1 registered, =옛 w_flat_q 자리). **`wmem[sel] == 옛 ROM[sel]`(bit-identical: 동일 operand 순서·동일 L=1 타이밍) → mul array 값·타이밍 불변 = 동작 보존** (iverilog 40/40 재검증). audit: hex == golden U bit-for-bit.
+- **폭(A)**: 동시에 ±128 가정 → relu d∈[0,127] 이론 worst+margin 으로 재사이징 (VW14/MW25/YW28/UW12/PW24/TW11, `relu_bounds()`).
+- **U sparsity**: G_IM 이 i,−i 행에만 → U 의 많은 (p,q) 가 **real-only**(im=0). 이게 46<72(36×2) 곱셈의 근거(§4.2).
+- **trade-off**: 가중치 고정(MNIST) — 재학습 시 `winograd_gen.py` 재실행 + re-synth (conv1/fc 처럼 런타임 reload 불가). 고정 평가엔 IP 0개·저지연이라 채택.
+- ※ 초안의 `winograd_u_pack.py` / `data/weights_winograd/u_weights.hex`+`.h` 는 **미생성**(기각된 안 — repo 에 없음).
 
 ---
 

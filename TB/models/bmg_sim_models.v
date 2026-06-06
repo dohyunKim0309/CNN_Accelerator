@@ -171,6 +171,41 @@ endmodule
 
 
 // ===========================================================================
+// wino_weight_bram : SDP 32b × 8192 (5888 used), L=2 (regceb).  Winograd conv2
+//   PS-writable pre-transformed U operand (1/word, [11:0]).  Port A byte-write
+//   (AXI WSTRB).  conv2_weight_bram 과 동일 구조, depth 만 1024→8192 (13-bit addr).
+// ===========================================================================
+module wino_weight_bram (
+    input  wire        clka,
+    input  wire        ena,
+    input  wire [3:0]  wea,
+    input  wire [12:0] addra,
+    input  wire [31:0] dina,
+
+    input  wire        clkb,
+    input  wire        enb,
+    input  wire [12:0] addrb,
+    output reg  [31:0] doutb,
+    input  wire        regceb
+);
+    reg [31:0] mem [0:8191];
+    reg [31:0] pre;
+
+    always @(posedge clka) if (ena) begin
+        if (wea[0]) mem[addra][ 7: 0] <= dina[ 7: 0];
+        if (wea[1]) mem[addra][15: 8] <= dina[15: 8];
+        if (wea[2]) mem[addra][23:16] <= dina[23:16];
+        if (wea[3]) mem[addra][31:24] <= dina[31:24];
+    end
+
+    always @(posedge clkb) begin
+        if (enb)    pre   <= mem[addrb];
+        if (regceb) doutb <= pre;
+    end
+endmodule
+
+
+// ===========================================================================
 // bram_c2_to_pool : 128b × 2048, L=2 (Primitive Output Register Enable)
 //   300MHz 오버클럭 위해 L=1 → L=2 변경 (BRAM clock-to-out 단축).
 //   Port B: core read register (ENB gated) + output register (REGCEB tied 1).

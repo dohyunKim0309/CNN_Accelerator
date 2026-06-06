@@ -2,7 +2,8 @@
 
 > Arty A7-100T FPGA 보드 위에서 동작하는 MNIST CNN 추론 가속기.
 > Conv1 → Conv2 → MaxPool → FC 파이프라인을 INT8 데이터패스로 구현하며,
-> Conv2 레이어 병목을 Winograd Convolution 으로 가속하는 것이 최종 목표.
+> Direct baseline 200MHz 보드 검증을 완료했고, 현재 Conv2 Winograd 가속 버전을
+> 200MHz synthesis + implementation 중이다.
 
 **수업**: 지능형시스템설계및응용
 
@@ -46,6 +47,16 @@ Output Logit (10) → argmax
 
 > 단일 이미지 latency 뿐 아니라 PS-PL 데이터 전송, BRAM 입출력, 1만 장 batch 전체에 걸친 누적 시간을 모두 고려한 end-to-end 시간이 평가 기준이다.
 
+### 현재 상태 (2026-06-04)
+
+- **Direct baseline**: 200MHz 구현 및 보드 검증 완료
+  - MNIST 10,000장 class match: **10000 / 10000**
+  - 최초 200MHz HW 실측: **108.9 ms**
+  - Vitis feed-overlap 최적화 후 현재 기준선: **약 98 ms**
+- **Winograd 버전**: Conv2 Winograd 및 Conv1 2× rebalance 추가 후 **200MHz synthesis + implementation 진행 중**
+  - Conv2 Winograd engine 은 iverilog 기준 bit-exact 검증 완료
+  - 보드 실측 latency 는 implementation 완료 후 갱신 예정
+
 ---
 
 ## 2. 로드맵
@@ -54,23 +65,28 @@ Output Logit (10) → argmax
 
 ### Phase 0 — Sobel Baseline (완료)
 
-`AS1_Sobel_Baseline/` 에 위치.정 102×102 grayscale 이미지에 대한 3×3 Sobel edge detection IP. CNN 가속기를 위한 기본 인프라(Line buffer + 3×3 window register, AXI CSR 슬레이브, BRAM Port A/B 분리, PS-PL 데이터 전송 프로토콜) 를 검증하는 단계.
+`AS1_Sobel_Baseline/` 에 위치. 102×102 grayscale 이미지에 대한 3×3 Sobel edge detection IP. CNN 가속기를 위한 기본 인프라(Line buffer + 3×3 window register, AXI CSR 슬레이브, BRAM Port A/B 분리, PS-PL 데이터 전송 프로토콜) 를 검증하는 단계.
 
-### Phase 1 — INT8 Direct CNN Accelerator (진행 중)
+### Phase 1 — INT8 Direct CNN Accelerator (완료)
 
-`RTL/` 에서 본격적으로 시작. 명세 그대로의 INT8 Direct Convolution 으로 전체 파이프라인 구현. 1만 장 처리 latency 의 기준선(baseline) 을 확보하는 단계.
+`RTL/` 에서 본격적으로 시작. 명세 그대로의 INT8 Direct Convolution 으로 전체 파이프라인을 구현하고, 1만 장 처리 latency 의 기준선(baseline) 을 확보한 단계.
 
 - Output Stationary + Weight Stationary 데이터플로우 채택
 - Conv1 기준 `oc_par × ic_par × KH × KW = 2 × 2 × 3 × 3 = 18 DSP` 사용
 - Conv2 기준 `oc_par × ic_par × KH = 8 × 16 × 3 = 192 DSP` 사용
 - 채널별 line buffer + window register 로 streaming 처리
+- 200MHz post-implementation timing closure 및 보드 검증 완료
+- 현재 baseline: **200MHz, MNIST 10,000장 약 98 ms**
 
-### Phase 2 — Winograd Conv2 가속 (예정)
+### Phase 2 — Winograd Conv2 가속 (진행 중)
 
-Conv2 가 전체 latency 의 병목임을 확인했으므로, F(4,3) 또는 complex F(4,3) Winograd 변환으로 Conv2 의 multiply 수를 줄여 1만 장 처리 시간을 단축한다.
+Conv2 가 전체 latency 의 병목임을 확인했으므로, complex F(4,3) Winograd 변환으로 Conv2 의 multiply 수를 줄여 1만 장 처리 시간을 단축한다.
 
 - 8×8 INT8 SIMD packing 알고리즘은 `docs/DSP48E1_signed8x8_SIMD_Packing.md` 에 정리
 - 알고리즘 reference 구현은 `scripts/golden_sim/1_complex_winograd_f(4,3).py`
+- Winograd 관련 작업은 `RTL/conv2_winograd/`, `RTL/conv1_2x/`, `docs/winograd/` 에 정리
+- Conv2 Winograd engine 은 iverilog bit-exact 검증 완료
+- 현재 200MHz synthesis + implementation 진행 중이며, HW 실측 결과는 pending
 
 ### Phase 3 — 최적화
 
@@ -107,9 +123,10 @@ Block Design (Vivado GUI)
         │   ├── input_bram (BRAM × 2 bank)
         │   ├── conv1_w_bram
         │   └── pe_array  ※ core_module (line_buffer, window_register, pe_cell, truncate_relu) 인스턴스화
-        ├── conv2_engine (Direct baseline, Winograd stretch)
-        │   ├── conv2_w_bram
-        │   └── pe_array  ※ core_module 공용 (line_buffer × 8 포함)
+        ├── conv2_engine / conv2_winograd_engine (Direct baseline 완료, Winograd 통합 진행)
+        │   ├── conv2_w_bram (Direct baseline)
+        │   ├── wino_weight_rom (Winograd baked ROM)
+        │   └── pe_array 또는 Winograd datapath
         ├── maxpool_engine
         ├── fc_engine
         │   ├── fc_w_bram
@@ -137,6 +154,7 @@ CNN_Accelerator/
 ├── TB/                   # Verilog testbench (현재 비어 있음, 엔진별 추가 예정)
 ├── scripts/              # Python reference / weight·activation 변환 스크립트
 │   ├── golden_sim/       # 명세 검증 reference (bit-exact 비교, Winograd 알고리즘)
+│   ├── weights/          # Winograd weight transform / ROM 생성
 │   ├── header_gen/       # SIMD-packed weight 를 C header 로 변환
 │   └── hex_gen/          # Verilog $readmemh 용 hex dump 생성
 ├── data/                 # 학습 완료된 weight 와 reference 입출력
@@ -170,7 +188,9 @@ Phase 1 이후 모든 CNN 가속기 RTL 이 모이는 메인 디렉토리. 위 B
   - `truncate_relu.v` — LSB-10bit shift + saturation + ReLU (parameter 화)
 - `conv1/` — Conv1 engine
   - `conv1_engine.v`, `conv1_fsm.v`, `adder_tree.v`, `weight_loader.v`
-- `conv2/` — Conv2 engine (구현 진행 중, 현재 비어 있음)
+- `conv1_2x/` — Winograd 단계에서 Conv1 병목을 낮추기 위한 2× DSP rebalance 버전
+- `conv2/` — Direct baseline Conv2 engine
+- `conv2_winograd/` — Complex F(4,3) Winograd Conv2 engine
 
 (이후 maxpool_engine / fc_engine / argmax_unit / ping_pong_buffer 등이 추가될 예정)
 
@@ -182,6 +202,7 @@ Phase 1 이후 모든 CNN 가속기 RTL 이 모이는 메인 디렉토리. 위 B
   - `reference_core.py` — 공통 유틸리티. `.npy` 로드, MNIST 라벨 로드, bit-exact 비교, `Conv2D_Spec` / `FC_Spec` 등 명세 saturation 규칙 (LSB-10bit shift + clip[-128,127]) 을 갖는 base 레이어 클래스 정의
   - `0_reference.py` — INT8 Direct 컨볼루션 reference. 명세 그대로 구현하여 `data/npy/output.npy` 와 bit-exact 일치 검증
   - `1_complex_winograd_f(4,3).py` — Complex F(4,3) Winograd 변환 reference 구현
+- `weights/` — Winograd weight transform 및 ROM 생성 스크립트
 - `header_gen/` — SIMD-packed weight 를 Vitis 펌웨어용 C header 로 변환 (산출물: `data/headers_simd/`)
 - `hex_gen/` — Verilog `$readmemh` 가 읽을 수 있는 hex dump 생성 (산출물: `data/hex_layer_by_layer/`)
 
@@ -205,6 +226,8 @@ Phase 1 이후 모든 CNN 가속기 RTL 이 모이는 메인 디렉토리. 위 B
 
 - `project_overview.md` — 보드/자원 한도, 타겟 CNN, 결정 사항, 업무 분담 결정 내역
 - `DSP48E1_signed8x8_SIMD_Packing.md` — DSP48E1 단일 multiplier 로 signed 8×8 두 개를 동시에 수행하는 SIMD packing 알고리즘 (Winograd 단계 핵심 기법)
+- `overclock_journey_100_to_200mhz.md`, `timing/` — 100MHz → 200MHz timing closure 과정 및 HW 측정 근거
+- `winograd/` — Conv2 Winograd, Conv1 2× rebalance, cycle-level timing 및 검증 문서
 - `cowork_guide.md` — Git / GitHub / VSCode / Python 환경 세팅부터 PR 까지의 협업 가이드
 - `pdfs/` — 과제 안내문, 베이스라인 보고서, 구현 계획 PDF, Winograd 참고 자료
 
@@ -227,4 +250,6 @@ Phase 1 이후 모든 CNN 가속기 RTL 이 모이는 메인 디렉토리. 위 B
 
 - 프로젝트 명세 및 계획: [`docs/project_overview.md`](docs/project_overview.md)
 - DSP48E1 SIMD Packing: [`docs/DSP48E1_signed8x8_SIMD_Packing.md`](docs/DSP48E1_signed8x8_SIMD_Packing.md)
+- 200MHz timing closure 기록: [`docs/overclock_journey_100_to_200mhz.md`](docs/overclock_journey_100_to_200mhz.md)
+- Winograd 작업 인덱스: [`docs/winograd/README.md`](docs/winograd/README.md)
 - 협업 가이드: [`docs/cowork_guide.md`](docs/cowork_guide.md)

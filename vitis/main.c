@@ -1,16 +1,19 @@
 /*
- * main.c — CNN Accelerator (Conv1+Conv2+Maxpool+FC) 제어 (MicroBlaze / Arty A7-100T)
+ * main.c — CNN Accelerator final control app (MicroBlaze / Arty A7-100T)
  *
- *   ★★ phase-2 bitstream 기준 ★★
+ *   ★★ Final bitstream: 200MHz Complex Winograd F(4x4, 3x3) ★★
  *     - CSR STATUS : [0]done [1]can_load [15:2]img_cnt   (result 는 STATUS 에서 제거됨)
  *     - 결과       : output BRAM(bram_output, result_bram_axi @ 0xC800_0000)에 PL 이 누적
  *                    → 처리 종료 후 PS 가 일괄 read (word=4결과, byte k 의 low 4-bit = img 4w+k)
- *     - weight     : conv1/conv2/fc 전부 SIMD-packed 헤더 그대로 **direct write** (★ 변환 금지)
- *                    fcw 512b (16ch × 32b SIMD-A/word) — 32→512 upsizer 가 16개씩 packing
+ *     - weight     : conv1/fc SIMD-packed 헤더 그대로 **direct write** (★ 변환 금지).
+ *                    fcw 512b (16ch × 32b SIMD-A/word) — 32→512 upsizer 가 16개씩 packing.
+ *                    ★ conv2 = Complex Winograd F(4x4, 3x3), weight = PS-writable
+ *                      pre-transformed U (conv2_winograd_weights[5888], 1 op/word) →
+ *                      c2w AXI BRAM Ctrl 로 write, engine 내부 loader 가 wmem 조립.
  *     - input      : test_images = pre-packed uint32 (gen 산출) → word 그대로 전송
  *
- *   ★ 듀얼클럭(overclock): 가속기 datapath(conv1/2·maxpool·fc) = clk_out3 (주파수는 clk_wiz/BD
- *     에서 설정 — firmware 는 모름·무관), PS/AXI/CSR/CDMA = clk_out1 100MHz. firmware 무변경.
+ *   ★ 듀얼클럭: 가속기 datapath(conv1·winograd conv2·maxpool·fc) = clk_out3 200MHz,
+ *     PS/AXI/CSR/CDMA = clk_out1 100MHz. firmware 는 100MHz CSR timer 로 wall-clock 을 측정한다.
  *   ★ latency timer(CSR 0x08/0x0C)는 clk_out1 100MHz 도메인 = wall-clock. us = cyc/100 (정확).
  *   ※ 아래 profile(t_write/t_canload)은 'PS 가 어디서 시간을 쓰나'의 단순 분해(PS-busy)일 뿐,
  *     HW 병목 판정 아님(overlap/pipeline 미반영).
@@ -24,7 +27,12 @@
 /* ===== Base addresses ===== */
 #define CSR_BASE     0x44A00000U                    /* csr (BD inst=csr_axi_1) — 하드코딩(XPAR_CSR_AXI_0/_1 rename 회피) */
 #define CONV1W_BASE  XPAR_C1W_BRAM_AXI_BASEADDR     /* 0xC000_0000 */
-#define CONV2W_BASE  XPAR_C2W_BRAM_AXI_BASEADDR     /* 0xC200_0000 */
+/* CONV2W: conv2=Complex Winograd F(4,3), weight = PS-writable pre-transformed U.
+ * conv2_winograd_engine 내부 wino_weight_bram(32b×8192) Port A → BD inst `wino_bram_axi`.
+ * PS 가 conv2_winograd_weights[5888] 를 순차 write (1 operand/word, [11:0]).
+ * ★ BD AXI BRAM Ctrl 이름 = wino_bram_axi → XPAR_WINO_BRAM_AXI_BASEADDR (= 0xC200_0000).
+ *   Range 는 32K(8192 word) 여야 5888 word 전부 decode 됨. (8K=2048 word 면 weight 깨짐.) */
+#define CONV2W_BASE  XPAR_WINO_BRAM_AXI_BASEADDR    /* 0xC200_0000 (BD inst wino_bram_axi) */
 #define FCW_BASE     XPAR_FCW_BRAM_AXI_BASEADDR     /* 0xC400_0000 (512b) */
 #define INPUT_BASE   0xC6000000U                    /* input BRAM — 하드코딩 (A: input이 ram_interconnect로 이동→MB xparameters 미정의) */
 #define OUTPUT_BASE  0xC8000000U                    /* result_bram_axi (bram_output) — 하드코딩 */
@@ -46,15 +54,20 @@
 /* ★ 진단 플래그: 1 이면 이미지 CDMA 전송량을 784B→16B 로 줄임 (CDMA 자체는 계속 돌려
  *   spacing/handshake 유지 → skip 방식의 hang 회피). 전송시간(t_write)이 ~549→~350 으로
  *   줄어드는 만큼만 latency 가 빠지면 = 그 부분이 feed 비용. (skip 만큼 깨끗하진 않음.)
- *   firmware-only: 비트스트림 그대로, ELF 만 재빌드. 측정 후 0 으로 되돌릴 것.
- *   ※ 더 깨끗한 비교: '오버클럭 없는(100MHz) DMA 버전' latency 와 오버클럭(0.188s) 비교. */
+ *   firmware-only: 비트스트림 그대로, ELF 만 재빌드. 최종 실측은 반드시 0 으로 둔다. */
 #define FEED_TEST  0
+
+/* HW bring-up diagnostics.
+ *  - Input readback confirms CDMA actually wrote bank0 before img_ready.
+ *  - Raw output words distinguish "PL classified 0" from "PS reads zeros". */
+#define DIAG_HW    0
+
 
 /* CTRL bits */
 #define CTRL_EN    0x1U
 #define CTRL_ST    0x2U
 #define CTRL_IMG   0x4U
-/* STATUS decode (phase-2) */
+/* STATUS decode (final Winograd bitstream) */
 #define ST_DONE(s)    ( (s)        & 0x1U)
 #define ST_CANLOAD(s) (((s) >> 1)  & 0x1U)
 #define ST_IMGCNT(s)  (((s) >> 2)  & 0x3FFFU)
@@ -63,9 +76,9 @@
 #define IN_WORDS    196U    /* 784 byte / 4 (input BRAM Port A words per image) */
 
 /* ===== Data (C arrays) ===== */
-#include "conv1_weights_simd.h"   /* conv1_weights_simd[36]   */
-#include "conv2_weights_simd.h"   /* conv2_weights_simd[576]  */
-#include "fc_weights_simd.h"      /* fc_weights_simd[11520]   (512b fcw 에 16개씩 direct) */
+#include "conv1_weights_simd.h"        /* conv1_weights_simd[36]   */
+#include "conv2_winograd_weights.h"    /* conv2_winograd_weights[5888] = pre-transformed U (1 op/word) */
+#include "fc_weights_simd.h"           /* fc_weights_simd[11520]   (512b fcw 에 16개씩 direct) */
 #include "test_images.h"          /* test_images[N*196] uint32 (pre-packed), test_labels[N], TEST_N_IMAGES */
 
 #define N_IMAGES   TEST_N_IMAGES
@@ -74,8 +87,10 @@
 static inline u32  csr_stat(void)  { return Xil_In32(CSR_BASE + CSR_STATUS); }
 static inline void csr_ctrl(u32 v) { Xil_Out32(CSR_BASE + CSR_CTRL, v); }
 
-/* ---- weight : SIMD-packed 헤더를 그대로 BRAM Port A 에 direct write (★ 변환 없음) ----
- *   conv1/conv2/fc 동일. fcw 는 512b 라 32→512 upsizer 가 16 × 32b → 512b word 로 묶음. */
+/* ---- weight : 헤더를 그대로 BRAM Port A 에 direct write (★ 변환 없음) ----
+ *   conv1/fc/conv2(winograd) 모두 사용. conv2 = pre-transformed Winograd U(1 op/word),
+ *   engine 내부 loader 가 start 후 wmem 으로 조립.
+ *   fcw 는 512b 라 32→512 upsizer 가 16 × 32b → 512b word 로 묶음. */
 static void write_weights(u32 base, const uint32_t *w, u32 n)
 {
     for (u32 i = 0; i < n; i++)
@@ -85,12 +100,35 @@ static void write_weights(u32 base, const uint32_t *w, u32 n)
 /* ---- AXI CDMA Simple-mode transfer (DDR src → input BRAM dst, blocking) ---- */
 static inline void cdma_xfer(u32 src, u32 dst, u32 bytes)
 {
+    Xil_DCacheFlushRange((UINTPTR)src, bytes);              /* DDR source visible to CDMA */
     while (!(Xil_In32(CDMA_BASE + CDMA_SR) & 0x2U)) ;   /* wait Idle */
     Xil_Out32(CDMA_BASE + CDMA_SA, src);
     Xil_Out32(CDMA_BASE + CDMA_DA, dst);
     Xil_Out32(CDMA_BASE + CDMA_BTT, bytes);             /* write BTT → transfer 시작 */
     while (!(Xil_In32(CDMA_BASE + CDMA_SR) & 0x2U)) ;   /* wait done(Idle) */
 }
+
+#if DIAG_HW
+static void diag_input_bank0(void)
+{
+    xil_printf("[diag] input bank0 first 8 words after CDMA:\r\n");
+    for (u32 i = 0; i < 8U; i++) {
+        u32 got = Xil_In32(INPUT_BASE + i * 4U);
+        u32 exp = test_images[i];
+        xil_printf("  in[%u] got=0x%08x exp=0x%08x %s\r\n",
+                   (unsigned)i, (unsigned)got, (unsigned)exp,
+                   (got == exp) ? "OK" : "X");
+    }
+}
+
+static void diag_output_words(u32 words)
+{
+    xil_printf("[diag] output BRAM first %u raw words:\r\n", (unsigned)words);
+    for (u32 w = 0; w < words; w++)
+        xil_printf("  out[%u] = 0x%08x\r\n",
+                   (unsigned)w, (unsigned)Xil_In32(OUTPUT_BASE + w * 4U));
+}
+#endif
 
 /* ---- 이미지 1장 ping-pong bank write — CDMA burst (196 Xil_Out32 대체) ----
  *   src = DDR 의 test_images[img] (const→.rodata→DDR), dst = input BRAM bank.
@@ -108,18 +146,21 @@ int main(void)
     Xil_ICacheEnable();
     Xil_DCacheEnable();
 
-    xil_printf("\r\n=== CNN Accelerator Test (phase-2, N=%u) ===\r\n", (unsigned)N_IMAGES);
+    xil_printf("\r\n=== CNN Accelerator Final: 200MHz Complex Winograd F(4x4, 3x3) (N=%u) ===\r\n",
+               (unsigned)N_IMAGES);
 
-    /* ---- 1. Weight 적재 (전부 SIMD-packed 그대로 direct, 변환 금지) ---- */
-    xil_printf("[1] weights (direct): conv1=%u conv2=%u fc=%u\r\n",
-               (unsigned)CONV1_WEIGHTS_SIMD_LEN, (unsigned)CONV2_WEIGHTS_SIMD_LEN,
+    /* ---- 1. Weight 적재 (conv1/fc SIMD direct + conv2 winograd pre-transformed U) ----
+     *   conv2 = pre-transformed Winograd U (1 op/word) → engine 내부 loader 가
+     *   start 후 wmem 으로 조립 (start → LOAD_WEIGHTS → image loop). */
+    xil_printf("[1] weights: conv1=%u, conv2(winograd U)=%u, fc=%u direct-write\r\n",
+               (unsigned)CONV1_WEIGHTS_SIMD_LEN, (unsigned)CONV2_WINO_WEIGHT_COUNT,
                (unsigned)FC_WEIGHTS_SIMD_LEN);
-    write_weights(CONV1W_BASE, conv1_weights_simd, CONV1_WEIGHTS_SIMD_LEN);
-    write_weights(CONV2W_BASE, conv2_weights_simd, CONV2_WEIGHTS_SIMD_LEN);
-    write_weights(FCW_BASE,    fc_weights_simd,    FC_WEIGHTS_SIMD_LEN);
+    write_weights(CONV1W_BASE, conv1_weights_simd,     CONV1_WEIGHTS_SIMD_LEN);
+    write_weights(CONV2W_BASE, conv2_winograd_weights, CONV2_WINO_WEIGHT_COUNT);
+    write_weights(FCW_BASE,    fc_weights_simd,        FC_WEIGHTS_SIMD_LEN);
 
     /* ---- 2. enable → start + CDMA reset ---- */
-    xil_printf("[2] enable + start\r\n");
+    xil_printf("[2] accelerator enable + start  (PL datapath 200MHz)\r\n");
     csr_ctrl(CTRL_EN);
     csr_ctrl(CTRL_EN | CTRL_ST);
 
@@ -129,7 +170,7 @@ int main(void)
 
     /* ---- 3. 이미지 루프: can_load(bit1) → input write → img_ready → img_cnt(bit2) 증가 대기.
      *        result 는 STATUS 에 없음 — bram_output 에 누적 (루프 후 [4] 일괄 read) ---- */
-    xil_printf("[3] %u images (can_load-paced, inter-image pipelined)...\r\n", (unsigned)N_IMAGES);
+    xil_printf("[3] %u images: can_load-paced inter-image pipeline\r\n", (unsigned)N_IMAGES);
     u32 prev_cnt = 0;
     u32 t_write = 0, t_canload = 0;            /* [profile] PS write vs can_load(=conv1 소비) 대기 */
     for (u32 img = 0; img < N_IMAGES; img++) {
@@ -151,6 +192,10 @@ int main(void)
         /* 빈 bank(img&1) 에 이미지 write + img_ready pulse */
         ta = Xil_In32(CSR_BASE + CSR_TIMER_LO);
         write_image(img);                      /* FEED_TEST=1 이면 내부에서 16B 만 전송(CDMA·spacing 유지, hang 회피) */
+#if DIAG_HW
+        if (img == 0U)
+            diag_input_bank0();
+#endif
         csr_ctrl(CTRL_EN | CTRL_IMG);          /* img_ready pulse → inflight++ */
         tb = Xil_In32(CSR_BASE + CSR_TIMER_LO);
         t_write += tb - ta;
@@ -171,6 +216,9 @@ int main(void)
 
     /* ---- 4. 결과 수집 : output BRAM(0xC800_0000) 일괄 read → test_labels 비교 ----
      *   word w = image 4w..4w+3 의 result (byte k 의 low 4-bit = digit). uncached MMIO. */
+#if DIAG_HW
+    diag_output_words(8U);
+#endif
     u32 matched = 0;
     for (u32 w = 0; w < (prev_cnt + 3U) / 4U; w++) {
         u32 word = Xil_In32(OUTPUT_BASE + w * 4U);
@@ -189,17 +237,17 @@ int main(void)
 
     /* ---- 5. 결과 + latency (48-bit timer; N<10000 이면 미정지 → snapshot) ---- */
     /* timer = CSR(clk_out1 100MHz) wall-clock 카운터. us = cyc/100 (정확).
-     * 가속기 클럭(clk_out3)이 빠를수록 같은 work 가 더 적은 timer cyc 에 끝남. */
+     * Winograd datapath 는 clk_out3 200MHz, timer 는 clk_out1 100MHz 기준 wall-clock. */
     u32 t_lo = Xil_In32(CSR_BASE + CSR_TIMER_LO);
     u32 t_hi = Xil_In32(CSR_BASE + CSR_TIMER_HI) & 0xFFFFU;
     u32 us   = (t_hi == 0U) ? (t_lo / 100U) : 0xFFFFFFFFU;
 
-    xil_printf("\r\n=== Result ===\r\n");
+    xil_printf("\r\n=== Final Result: 200MHz Complex Winograd F(4x4, 3x3) ===\r\n");
 #if FEED_TEST
-    xil_printf("[FEED_TEST] CDMA = 16B only (data garbage, class match 무의미). latency 만 참고.\r\n");
+    xil_printf("[FEED_TEST] CDMA = 16B only; class match is invalid, latency only.\r\n");
 #endif
     xil_printf("class match : %u / %u\r\n", (unsigned)matched, (unsigned)prev_cnt);
-    xil_printf("latency     : %u cyc ~%u us wall-clock  [100MHz timer]%s\r\n",
+    xil_printf("latency     : %u cyc ~%u us wall-clock  [timer=100MHz, PL=200MHz]%s\r\n",
                (unsigned)t_lo, (unsigned)us,
                (N_IMAGES == 10000U) ? "" : " [snapshot]");
     if (t_hi != 0U)
@@ -208,7 +256,7 @@ int main(void)
     u32 denom = (t_lo >= 100U) ? (t_lo / 100U) : 1U;       /* % 계산 (u64 회피) */
     u32 pw = t_write   / denom;                            /* PS 가 blocking CDMA 안에 있던 비중 */
     u32 pc = t_canload / denom;                            /* PS 가 can_load(빈 bank) 기다린 비중 */
-    xil_printf("PS time     : in-CDMA(blocking) %u%% (%u cyc)   waiting-can_load %u%% (%u cyc)\r\n",
+    xil_printf("PS profile  : in-CDMA(blocking) %u%% (%u cyc)   waiting-can_load %u%% (%u cyc)\r\n",
                (unsigned)pw, (unsigned)t_write, (unsigned)pc, (unsigned)t_canload);
 
     return 0;

@@ -127,38 +127,36 @@
   → **펄스 폭(N배 카운트) + 메타를 동시에** 해결. 2-FF(메타 resolve)가 알맹이, toggle 래퍼가 펄스 의미 보존.
 - **세 갈래 정리**: ① level → `cdc_bit_sync`, ② pulse → `cdc_pulse_sync`, ③ **multi-bit 버스(BMG write) → 동기화기 불가**(비트별 resolve 시점 달라 깨짐) **→ XDC `set_max_delay`로 처리**. → CDC 표면적이 **1-bit 5개뿐**이라 검증이 쉬웠던 게 핵심.
 
-**(c) MMCM 함정 — "188 MHz는 존재하지 않는다"** (스토리의 1차 반전)
-- clk_wiz(MMCM)에서 `clk_out1=100` + `clk_out2=200`(MIG IDELAYCTRL ref)이 **VCO 주파수를 고정**한다. 그러면 `clk_out3`는 그 VCO의 **정수 분주**만 가능 → 실제로 낼 수 있는 값은 **{200, 171.4, 166.7, 150, …}의 이산 집합**.
-- **188을 요청해도 clk_wiz가 200으로 스냅**한다. → "190/188로 타협"은 애초에 불가능했고, 닫을 후보는 **낮은 쪽(171.4/166.7/150)** 또는 **높은 쪽(200, 닫히면)** 뿐.
-- 교훈: **클럭 목표를 정하기 전에 MMCM가 그 주파수를 *실제로* 생성할 수 있는지** `report_clocks`로 먼저 확인. (이 스냅이 뒤(e)의 silent-fail 빌미가 된다.)
+**(c) 착수 전 정지작업 — FC argmax: "합성기가 10단 직렬 비교기로 풀어버린다"** (150 *이전*에 처리)
+- 본격 오버클럭 전, datapath엔 이미 **100 MHz에서도 안 닫히는 곳**이 있었다: FC 끝단 10-class argmax.
+- **1-cycle combinational 10-way 비교**로 짜면 24-bit 비교기 **9단이 직렬**로 풀려 **setup −8.6 ns @100 MHz** — 클럭을 올리기는커녕 100도 위험. (블록디자인 함정 목록에도 기록.)
+- **해결: 4-round 파이프라인 토너먼트** `10→5→3→2→1`, round마다 register → stage critical path = "**24-bit 비교 1개 + 2:1 mux**"만 남김.
+- tie-break: 페어링을 left가 항상 더 낮은 인덱스가 되게 + strict `>` → **"낮은 인덱스 우선", 기존 combinational과 bit-exact 동일**(`RTL/fc/fc_argmax.v`). latency = in_valid 후 4 cycle.
+- → 이 datapath 정지작업을 먼저 닫아두고 본격 클럭 인상 시작.
 
-**(d) 100 → 150 — Conv2 broadcast fanout을 닫다**
+**(d) MMCM 함정 — "188 MHz는 존재하지 않는다"**
+- clk_wiz(MMCM)에서 `clk_out1=100` + `clk_out2=200`(MIG IDELAYCTRL ref)이 **VCO 주파수를 고정** → `clk_out3`는 그 VCO의 **정수 분주**만 → 낼 수 있는 값은 **{200, 171.4, 166.7, 150, …}의 이산 집합**.
+- **188을 요청해도 clk_wiz가 200으로 스냅** → "190/188 타협"은 애초 불가능, 후보는 **낮은 쪽(171/167/150)** 또는 **200(닫히면)** 뿐.
+- 교훈: 클럭 목표 정하기 전에 MMCM가 그 값을 *실제로* 내는지 `report_clocks`로 확인. 요청클럭 ≠ 실제클럭(188→200 스냅)이면 Vivado가 통과시킨 빌드도 실모드에서 깨질 수 있으니 — **positive WNS @ slow(signoff) corner**를 유일한 signoff 기준으로 삼는다.
+
+**(e) 100 → 150 — Conv2 broadcast fanout을 닫고, 일단 안전한 150에서 못 박다**
 - 300 MHz 1차 합성: **WNS −2.99, Failing 110302/176215, 전부 `clk_out3→clk_out3`**(datapath intra-clock). CDC·제약은 멀쩡(b).
-- **진단의 핵심 — 로직 깊이가 아니라 route**: 워스트 path가 **route 86% / logic 14%**, Logic Levels 3, DSP None. 즉 **연산이 느린 게 아니라 배선 거리가 문제**.
-- 원인: 제어/weight broadcast(`state`/`sel`/`pe_en`/`pe_id`/`packed_w`)가 **192개 PE로 fanout**. DSP **226/240 = 94%** 사용 → PE가 die 전역 DSP 컬럼에 깔림 → broadcast가 본질적으로 **die-spanning**. DSP 위치는 고정이라 floorplan 불가 → **복제 + 파이프라인이 유일 레버**.
-- 레버(누적):
-  1. **`max_fanout=32`** (conv2_fsm `state`/`kw_cnt`, weight_loader `pe_id`/`slot_id`/`pe_load_en`) + `phys_opt -directive AggressiveFanoutOpt`. → −2.99 → **−2.454**(~173 MHz). 복제만으론 부족.
-  2. **weight broadcast +1 register**(Step1b) — weight-load는 1회성이라 compute 무영향(cycle-neutral).
-  3. **`PE_BC_DELAY` PE 입력 파이프**(Step2) — PE 입력단에 +N register 복제 → broadcast가 PE 클러스터 근처 replica에서 출발. → **−2.187**.
-  4. **weight_loader nested-multiply → accumulator** — 주소/pe_id의 `(((oc·8)+ic)·3+kh)·3+kw` 6-level CARRY4를 단조증가 accumulator로 → **조합깊이 6 → 1**.
-- 검증: iverilog `tb_cnn_accelerator_multi` **40/40 bit-exact** (`PE_BC_DELAY` N=0→1798, 1→1799, 2→1800 cyc/img — 정확히 +N/img).
-- **그런데 300은 안 닫힌다**: broadcast를 닫아도 reset/FSM 잔여(−1.7~−1.94)가 die 전역에 남음 → **낮은 쪽 150 MHz에서 깨끗이 닫고**, HW **10000/10000** 확정(**0.128 s**, `150MHz_result.png`).
-
-**(e) 우회로 — 버린 가설 하나 (정직한 기록, 발표의 훅)**
-- 150 이후 한때 *"오버클럭을 더 해도 latency가 안 준다 = feed-bound(클럭 무관)"*라고 결론냈었다. 근거: "가속기 200 MHz인데 wall-clock이 100 MHz와 동일(18.77M cyc)"이라는 측정.
-- **이 가설을 폐기했다.** 그 "200 MHz 빌드"가 사실 **silently fail한 빌드**였을 가능성이 큼 — **188 설정 → 200으로 스냅(c) → 실제로는 200으로 돌면서 reset 경로(−1.94) 위반 → 분산 FSM/in-flight 카운터 desync → 중간에 멈춤/오작동.** 즉 "같은 wall-clock"은 **깨진 빌드끼리의 비교**라 확정 불가.
-- → 관련 결론/주석/메모를 전부 제거하고 **확실한 사실(150 동작)만** 남김.
-- **교훈 2개**: ① 측정으로 결론 내리기 전에 그 빌드가 **timing-clean(positive WNS @ slow corner)** 인지 먼저 봐라. ② 요청 클럭 ≠ 실제 클럭(188→200 스냅)이면 Vivado가 통과시킨 빌드도 실모드에서 **silent fail**한다. → 이 깨달음이 150→200의 방향("**reset부터 닫자**")을 정했다.
+- **진단 핵심 — 로직 깊이가 아니라 route**: 워스트 path **route 86% / logic 14%**, Logic Levels 3, DSP None → **연산이 느린 게 아니라 배선 거리가 문제**.
+- 원인: 제어/weight broadcast(`state`/`sel`/`pe_en`/`pe_id`/`packed_w`)가 **192 PE로 fanout**. DSP **226/240 = 94%** → PE가 die 전역 DSP 컬럼에 깔려 broadcast가 본질적으로 **die-spanning**. DSP 위치 고정 → floorplan 불가 → **복제 + 파이프라인이 유일 레버**.
+- 레버(누적): `max_fanout=32`(conv2_fsm `state`/`kw_cnt`, weight_loader `pe_id`/`slot_id`/`pe_load_en`) + `phys_opt AggressiveFanoutOpt`(→−2.454) + weight bc +1reg(Step1b) + `PE_BC_DELAY` PE입력 파이프(Step2, →−2.187) + weight_loader nested-multiply→accumulator(조합깊이 **6→1**).
+- 검증: iverilog `tb_cnn_accelerator_multi` **40/40 bit-exact** (`PE_BC_DELAY` N=0→1798/1→1799/2→1800 cyc/img — 정확히 +N/img).
+- **왜 일단 150인가 (핵심 직관)**: die-spanning 경로엔 **고정된 물리 지연**이 있다 — 위 fix 후 워스트 tier ≈ **5.0~5.5 ns**, reset net ≈ **5.28 ns**. **150 MHz = 6.67 ns 주기**라 이 경로들이 **추가 묘수 없이 그냥 들어맞는다** → clean closure, **HW 10000/10000 (0.128 s, `150MHz_result.png`)**. 즉 150은 "**클럭 주기가 길어 die-spanning 경로가 저절로 fit**"하는 안전지대. (이 "물리 지연 vs 클럭 주기" 프레임이 바로 다음 200/300 판단의 핵심.)
 
 **(f) 150 → 200 — reset fanout을 닫다 (본편)**
-- 남은 최대 WNS = **단일 reset net** `rst_sync_reg → BUFG → (fanout 41323) → DSP/RSTB·register`, **−1.94, route 85%, 1343 violating endpoints, die 전역**. 한 net이 datapath 전 register(~41k)로 직접 fanout → BUFG 글로벌 라우팅으로 die 끝 DSP까지 가는 데 너무 김.
-- **접근 선택**: tie-0(reset 자체 제거) **기각**(기능 거동 바뀜·X-leak 검증 부담·fragile) → **reset 복제 트리 채택**(reset을 *제거*하지 않고 **분배 구조만** 바꿈 → 기능 완전 불변):
+- **200 MHz = 5.0 ns 주기.** 이제 **reset net(≈5.28 ns)이 더는 안 들어맞는다** → 클럭을 내리는 게 아니라 **경로 자체를 짧게** 만들어야 함.
+- 워스트 = **단일 reset net** `rst_sync_reg → BUFG → (fanout 41323) → DSP/register`, **−1.94, route 85%, 1343 endpoints, die 전역**. 한 net이 datapath 전 register(~41k)로 직접 fanout → BUFG 글로벌 라우팅으로 die 끝까지 너무 김.
+- **접근**: tie-0(reset 제거) **기각**(기능 바뀜·X-leak·fragile) → **reset 복제 트리**(분배 구조만 변경, 기능 완전 불변):
   ```verilog
-  (* max_fanout = 32  *) reg rst_l1;   // L1 trunk (few copies)
-  (* max_fanout = 128 *) reg rst_leaf; // L2 leaf (datapath로 대량 복제)
+  (* max_fanout = 32  *) reg rst_l1;   // trunk
+  (* max_fanout = 128 *) reg rst_leaf; // leaf → datapath
   ```
-  - 합성이 `rst_sync(1) → rst_l1(~11) → rst_leaf(~323) → datapath(~41k)` 트리를 **자동 생성**하고 leaf 복제본을 **자기 cluster 근처 배치** → 긴 high-fanout net이 **짧은 local net 다수로 쪼개짐**(BUFG 불필요).
-  - **async-assert(`negedge resetn`)/sync-deassert** 유지 → 모든 단이 스큐 0로 reset, deassert만 +2clk 균일(idle-start라 무해, leaf끼리 상대 스큐 0). 하류 `if(rst)`는 전부 그대로 → **기능 투명**.
+  - `rst_sync(1)→rst_l1(~11)→rst_leaf(~323)→datapath(~41k)` 트리 자동 생성, leaf를 **cluster 근처 배치** → 긴 net이 **짧은 local net 다수로 쪼개짐**(BUFG 불필요) → **reset 경로가 5.28 → 5.0 ns 밑으로** 짧아진다.
+  - async-assert/sync-deassert 유지 → 스큐 0, 하류 `if(rst)` 그대로 → **기능 투명**.
 - **양파 까기(onion-peeling) — 워스트 하나 닫으면 다음이 노출**:
 
   | 단계 | WNS | Failing | 조치 |
@@ -168,14 +166,18 @@
   | + conv2 `shift_en` max_fanout | **−0.098** | 1 | line buffer CE 클러스터 닫힘 |
   | + **phys_opt `-directive AggressiveExplore`** | **+0.011** | **0** | **MET ✅** |
 
-  - `shift_en`은 conv2_fsm의 **조합 출력**이 8 ic line_buffer/window CE로 die 전역 broadcast되는데(`line_buffer.mem`이 FF 합성 → CE=`shift_en&(ptr==addr)`), `state`/`kw_cnt`엔 있던 `max_fanout`이 **`shift_en`만 빠져 있었다** → `(* max_fanout=16 *)` 한 줄로 31→1.
-- **검증**: iverilog `tb_cnn_accelerator_multi` 40/40 + `tb_system_axi_multi` 10/10 bit-exact. (★ `dsp48e1_model.v`에 `initial`이 없어 reset 변경의 X를 **실제 전파**해서 잡는다 → bit-exact PASS = X-leak 없음 = HW(GSR=0)는 더 안전.)
-- **★ +0.011 = positive WNS @ slow(signoff) corner = 정식 MET** ((e)의 −1.94 silent fail과 근본적으로 다름).
+  - `shift_en`은 conv2_fsm의 **조합 출력**이 8 ic line_buffer/window CE로 die 전역 broadcast(`line_buffer.mem`이 FF 합성 → CE=`shift_en&(ptr==addr)`)되는데 `state`/`kw_cnt`엔 있던 `max_fanout`이 **`shift_en`만 빠져 있었다** → `(* max_fanout=16 *)` 한 줄로 31→1.
+- **검증**: iverilog 40/40 + `tb_system_axi_multi` 10/10 bit-exact. (★ `dsp48e1_model.v`에 `initial`이 없어 reset 변경의 X를 **실제 전파**해 잡는다 → bit-exact PASS = X-leak 0.)
+- **★ +0.011 = positive WNS @ slow(signoff) corner = 정식 MET.**
 
-**(g) FC argmax — "합성기가 10단 직렬 비교기로 풀어버린다"** (브레인덤프 포인트, datapath 내 또 다른 fanout-무관 병목)
-- FC 끝단 10-class argmax를 **1-cycle combinational 10-way 비교**로 짜면 24-bit 비교기 **9단이 직렬**로 풀려 **100 MHz에서도 setup −8.6 ns** → 200은 논외.
-- **해결: 4-round 파이프라인 토너먼트** `10→5→3→2→1`, round마다 register. stage critical path = "**24-bit 비교 1개 + 2:1 mux**"만 남김.
-- tie-break: 페어링을 left가 항상 더 낮은 인덱스가 되게 + strict `>` → **"낮은 인덱스 우선", 기존 combinational과 bit-exact 동일**(`RTL/fc/fc_argmax.v`). latency = in_valid 후 4 cycle.
+**(g) 왜 300은 포기했나 — "reset을 푼 게 곧 300이 열린다는 뜻은 아니다"** (정직한 ROI 판단)
+> 발표에서 받을 법한 질문을 선제적으로 — *"reset이 die 전역이라 문제였는데 200에서 복제 트리로 풀었으면, 같은 방법으로 300도 되지 않나?"*
+- **두 가지 이유로 안 된다**:
+  1. **reset 트리는 reset 경로를 5.0 ns 밑(=200 MHz)으로 내린 것이지 3.33 ns(=300) 밑이 아니다.** 복제로 route는 짧아지지만, 등록된 트리 + 41k 분배가 3.33 ns까지 내려가진 않는다.
+  2. **reset은 그 tier의 *최악 하나*일 뿐.** 그 아래에 ≈**5.0 ns(≈200 MHz)짜리 die-spanning 경로 무리**가 더 깔려 있다 — FC FSM(`pair_cnt`/`s_cnt`→state·fcw addr), conv2 `state`→pe_x, conv2 broadcast 잔여→DSP, conv2 `rdone`→conv1 fsm CE(cross-engine handshake). 이게 **"~200 MHz 벽"**.
+- **200**은 reset(최악) + 잔불 두엇(shift_en, phys_opt)만 끄면 이 무리(~5 ns)가 마침 5.0 ns에 **들어맞아** 닫힌다.
+- **300**은 이 무리 **전부를 각각 ~1.7 ns씩 더** 내려야 하는데, **DSP 94%라 floorplan 여지가 없고**(placer가 클러스터를 못 모음) 각 fix가 FC FSM 재설계·conv2 추가 파이프·handshake 재구성처럼 **침습적 + 재검증** → **ROI 붕괴**.
+- **결론**: MHz의 ROI 최대 구간 = **200까지**. 그 위 추가 가속은 클럭이 아니라 **알고리즘(4장 Complex Winograd — conv2 곱셈 자체를 144→46)**이 더 나은 레버. → 자연스럽게 4장으로 연결.
 
 **(h) 결과 & 왜 정확히 2×가 아닌가** (정직한 분석으로 마무리)
 - **150 MHz: 0.128 s**(12,795,913 cyc, in-CDMA 67%) → **200 MHz: 108.9 ms**(10,896,290 cyc, WNS +0.011) → **+ Vitis feed-overlap: 98 ms**(9,799,994 cyc, in-CDMA 56%).
@@ -195,12 +197,12 @@
 - **S1**: "클럭만 올리면 firmware 무변경으로 빨라진다" + `187 → 108.9 → 98 ms` 화살표.
 - **S2 (이 장의 한 장)**: **"이 칩의 벽 = route delay(배선 거리), 해법 = `max_fanout` 복제"** + route 86% 막대 + reset 복제 트리 그림.
 - **S3**: WNS 진행 표(한 줄씩 애니메이션) → **+0.011 MET**.
-- **S4**: argmax 9단 직렬 → 4-round 토너먼트(작은 임팩트 카드).
+- **S4**: argmax 9단 직렬 → 4-round 토너먼트(150 이전 정지작업, 작은 임팩트 카드).
 - **S5**: 실측 사진 2장 + "왜 1.72×인가 = CDMA feed 72%".
-- **말로만**: (b) CDC 무죄, (c)(e) MMCM 스냅 + silent-fail 훅("188은 존재하지 않았다"). 시간 빡세면 S4 생략하고 g는 한 문장.
+- **말로만**: (b) CDC 무죄, (d) MMCM 스냅 훅("188은 존재하지 않았다"). (g) 왜 300 포기는 **백업 1장**(Q&A 대비). 시간 빡세면 S4는 한 문장.
 
 ### ⑤ 예상 질문 (Q&A 대비)
-- **"왜 300이 아니라 200?"** → MMCM 이산값(200 다음이 171/167/150) + reset/broadcast 잔여가 300에선 die 전역(−1.7~−1.94), 200에서 clean.
+- **"왜 300이 아니라 200? reset 풀었으면 300도 되지 않나?"** → (g) 참고. reset 트리는 reset을 **5.0 ns(200) 밑으로** 내린 것이지 3.33 ns(300)가 아님 + reset은 최악 하나일 뿐, 그 아래 FC FSM/conv2 제어→DSP/handshake 등 **~5 ns die-spanning 무리**(="~200 벽")가 더 있음. 300은 그걸 전부 침습적으로 더 내려야 하고 DSP 94%라 floorplan 불가 → ROI 붕괴 → Winograd로 전환.
 - **"max_fanout 복제가 기능을 바꾸나?"** → 아니다. attribute-only, iverilog 40/40 bit-exact. reset은 async-assert/sync-deassert로 스큐 0 투명. (DSP 모델에 initial 없어 X-leak까지 잡았다.)
 - **"왜 2배 안 빨라지나?"** → in-CDMA(blocking) 72%가 100 MHz feed 도메인(클럭 무관) → 가속기 2×는 compute만 압축.
 - **"phys_opt가 재현되나?"** → interactive 결과라 그 in-memory design에서 바로 write_bitstream하거나, impl strategy에 AggressiveExplore post-route phys_opt를 넣어야 함(안 넣고 impl 재실행 시 −0.098 복귀). ← 함정 언급하면 가산점.

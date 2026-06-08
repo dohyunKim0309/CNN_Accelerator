@@ -2,12 +2,13 @@
 
 > **원칙**: 개요(이 문서)는 딥하게, **PPT 슬라이드는 가볍게**.
 > 각 섹션은 `① 한 줄 메시지 → ② 발표 논리(대본) → ③ 핵심 수치/그림 → ④ 슬라이드(가볍게) → ⑤ 예상 질문` 구조.
-> **담당**: 0 · 3 · 4 = 김도현 / 1 · 2 = 공동(엔진별 담당자)
+> **이 개요의 범위 = 김도현 발표분: 0(소개/협업) · 3(Overclock) · 4(Complex Winograd) + 5(결론)**.
+> 1(Computational 병목: SIMD packing/dataflow) · 2(Dataflow 병목: ping-pong/AXI-DMA)는 **팀원 위임 — 별도 작성**(여기선 제외).
 >
 > **전체 관통 서사**: "MNIST 1만 장 분류 **end-to-end latency** 최소화"라는 단일 목표 아래,
-> **병목을 측정 → 식별 → 제거**하는 사이클을 4번 돈다.
-> `Compute 병목 → Dataflow(전송) 병목 → Clock 병목 → Algorithm 병목`.
-> 매 단계 "**무엇이 새 병목인지 측정으로 확인**"하는 게 이 프로젝트의 방법론.
+> **병목을 측정 → 식별 → 제거**하는 사이클을 4번 돈다:
+> `Compute 병목(1·팀원) → Dataflow 전송 병목(2·팀원) → Clock 병목(3) → Algorithm 병목(4)`.
+> 매 단계 "**무엇이 새 병목인지 측정으로 확인**"하는 게 이 프로젝트의 방법론. (3·4가 그 뒷부분.)
 
 ---
 
@@ -38,7 +39,7 @@
 **(a) 문제 정의 — 무엇을, 어디서, 무엇을 기준으로**
 - **타겟 네트워크**: `Conv1(8,1,3,3) → ReLU → Conv2(16,8,3,3) → ReLU → MaxPool2×2 → FC(2304→10) → argmax`. 전부 INT8(weight/activation), 누적 후 `>>10 + ±127 saturation`.
 - **역할 분담(HW/SW)**: PS(MicroBlaze)는 **데이터 전송 + start/done 제어만**. 모든 추론 연산은 PL의 `cnn_accelerator` IP 내부.
-- **평가 지표(1순위)**: 단일 이미지 latency가 아니라 **1만 장 end-to-end** — PS→PL 전송, BRAM I/O, batch 누적까지 포함. → 이게 뒤의 모든 최적화 방향을 결정한다 (여기서 못 박아두면 1·2·3·4 전부 같은 자(尺)로 이야기됨).
+- **평가 지표(1순위)**: 단일 이미지 latency가 아니라 **1만 장 end-to-end** — PS→PL 전송, BRAM I/O, batch 누적까지 포함. → 이게 뒤의 모든 최적화(팀원 파트 1·2 + 내 파트 3·4) 방향을 결정한다 (여기서 못 박아두면 전부 같은 자(尺)로 이야기됨).
 - **제약(보드 한도)**: DSP48E1 **240개**, BRAM 135(4.6Mb), LUT 63K, FF 126K. → 특히 **DSP 240개**가 뒤 섹션 전부의 "예산". (Conv2가 MAC의 90%라 DSP를 다 먹는다 → SIMD packing / Winograd의 동기.)
 
 **(b) 시스템 아키텍처 (Block Design 한 장)**
@@ -79,67 +80,6 @@
 
 ---
 
-# 1. Computational Bottleneck and Solutions  〔공동〕
-
-### ① 한 줄 메시지
-> "연산량의 **90%가 Conv2**. DSP 240개 예산 안에서 Conv2를 채우려면 **DSP 한 개로 INT8 곱셈 2개**(SIMD packing) + **PE를 놀지 않게 하는 dataflow**가 필요하다."
-
-### ② 발표 논리
-- **병목 측정**: MAC 분포 — Conv1 6.6% / **Conv2 90.2%** / FC 3.1%. → Conv2가 throughput floor.
-- **DSP 예산 문제**: Conv2를 `oc×ic×K` 풀언롤하면 DSP 부족. → 해결책 **SIMD packing**.
-- **핵심 기여 — DSP48E1 signed 8×8 SIMD packing**:
-  - 단일 25×18 multiplier로 `P = (W1·2^17 + W0)·X` → 한 번에 `W0·X`, `W1·X` 두 곱.
-  - **차별점**: `-128` 포함 **모든 2^24 조합 bit-exact**. 오버플로우(`W1=-128 ∧ W0<0`)를 `-256·X` **산술 보정**(분기 없는 단일 경로)으로 처리.
-  - 선행연구 대비 우위: Xilinx WP486은 DSP48E2(27-bit) 전용, Vestias(FPL'17)는 -128 손상. **본 알고리즘은 좁은 DSP48E1(25-bit)에서 무손실** → 2^24 exhaustive 검증.
-- **Dataflow paradigm — Weight/Output Stationary, Activation Flowing**:
-  - Weight: PE-local register에 1회 적재 후 inference 동안 고정.
-  - Psum: 16 OC × 24-bit accumulator (K_col 3-cycle 누적).
-  - Activation: BRAM → line buffer → window → PE 스트리밍.
-  - → 매 cycle PE가 일하도록(95%+ utilization) 채우는 게 목적.
-- **결과**: Conv2 192 DSP, ~1728–1798 cyc/img. DSP 총 ~228/240.
-
-### ③ 핵심 수치/그림
-- MAC 파이 차트(Conv2 90%). SIMD packing `Aport = W1·2^17 + W0` 그림 1장. Stationary dataflow 그림. DSP 분배 표.
-
-### ④ 슬라이드 (가볍게)
-- 슬라이드 1: MAC 90% 파이 + "Conv2가 병목".
-- 슬라이드 2: SIMD packing 1장(수식 1줄 + "DSP 1개로 곱셈 2개, -128도 정확").
-- 슬라이드 3: dataflow 그림 1장.
-- 증명/비트 도출은 **부록**으로 빼고 말로 "exhaustive 검증" 한마디.
-
-### ⑤ 예상 질문
-- "왜 SIMD가 필요?" → DSP 240 한도 안에 Conv2를 넣기 위해.
-- "-128이 왜 문제?" → 25-bit 범위 초과 1케이스, 보정 안 하면 틀림.
-
----
-
-# 2. Dataflow Bottleneck and Solutions  〔공동〕
-
-### ① 한 줄 메시지
-> "Conv2를 빠르게 만들자 **데이터를 나르는 게** 새 병목. (a) stage 간 **ping-pong BRAM**으로 가속기 idle 제거, (b) PS→PL을 **AXI burst + DMA**로 교체 → 587→187 ms."
-
-### ② 발표 논리
-- **병목 이동**: compute를 채우고 나니 ① stage 간 대기, ② PS→PL 전송이 새 병목.
-- **(a) Inter-image Pipelining (1079→586)**:
-  - 한 이미지가 끝나기 전 다음 이미지를 적재. stage 사이 **2-bank ping-pong BRAM**(`c1_to_c2`/`c2_to_pool`/`pool_to_fc`)으로 producer/consumer 분리 → 가속기 노는 구간 제거.
-  - 양방향 핸드셰이크(write_done/read_done pulse + bank_sel toggle), 중앙 컨트롤러 없음.
-- **(b) AXI Burst + DMA (586→187)**:
-  - 프로파일 결과 **PS→PL word 단위 전송**이 병목 → AXI burst + CDMA로 교체.
-  - `input_consumed` **backpressure**로 PS write와 PL compute **오버랩**.
-- **결과**: 586 → 187 ms (baseline 대비 5.77×). 이후 floor = **CDMA feed**(100MHz 도메인) → 3장 오버클럭의 "왜 2×가 안 나오나"로 연결.
-
-### ③ 핵심 수치/그림
-- ping-pong 타이밍 다이어그램(producer/consumer 겹침). AXI burst 전/후 전송 그림. 586→187 화살표.
-
-### ④ 슬라이드 (가볍게)
-- 슬라이드 1: ping-pong 그림 + "idle 제거 1079→586".
-- 슬라이드 2: AXI burst+DMA 그림 + backpressure 한 줄 + "586→187".
-
-### ⑤ 예상 질문
-- "DMA 도입 후 남은 병목?" → CDMA feed(100MHz), 3장에서 다룸.
-
----
-
 # 3. Additional (1) — Overclock (100 → 200 MHz)  〔담당: 김도현〕
 
 > 근거 문서: `docs/overclock_journey_100_to_200mhz.md`(서사·디버깅 로그), `docs/overclock_300mhz.md`(기술 레퍼런스),
@@ -166,6 +106,26 @@
 - **XDC 제약 — 왜 필요한가 (발표 20초 포인트)**: 도메인을 둘로 나누면 100↔datapath **경계 경로**가 생기는데, STA(타이밍 분석기)는 기본적으로 이걸 *목적지 클럭 1주기 안에* 닫으라고 요구 → **실제론 여유 있는 멀쩡한 경로가 가짜 violation**으로 뜬다. → XDC로 "이 경계 경로를 어떻게 분석하라"고 정확히 알려줘야 **timing이 닫힌다**(안 하면 빌드 자체가 FAIL).
   - write-bus(100→datapath, 실데이터)는 `set_max_delay -datapath_only`(**비정수 클럭비**(190:100=1.9:1)에서도 비율 무관·idempotent해 안전; 애초 multicycle은 부적합), CDC 동기화기 입력(datapath→100)은 `set_false_path`.
 - **검증으로 CDC를 일찌감치 무죄 처리**: 듀얼클럭 TB `tb_system_axi_multi_2clk` **10/10**(3배카운트/펄스손실/데드락 없음) + `report_clock_interaction`. → **이후 어떤 타이밍 문제도 CDC가 원인이 아님을 확정** → 디버깅을 **datapath 내부(intra-clock)에만** 집중할 수 있었다.
+
+**(b′) CDC 두 모듈 — 무엇을, 왜 (미니 섹션)**
+> 경계 신호는 **종류별로** 처리가 다르다. 모든 CDC는 top `cnn_accelerator.v`의 **경계 5곳에만** 격리 → 엔진(conv1/2·maxpool·fc)·CSR·firmware 무변경.
+
+- **왜 필요한가 (위상 정렬돼도 동기화기가 필요한 이유)**: 두 클럭이 같은 MMCM라 위상 정렬돼도 —
+  1. **메타스테이빌리티**: 지터·coincident-edge 때문에 경계 FF가 불확정 상태에 빠질 수 있다 → 2-FF로 **resolve**(다음 클럭에 안정값으로 정착).
+  2. **펄스 폭(기능) 문제**: 100 MHz의 **1-cycle 펄스가 빠른 클럭에선 2~3 cycle로 보임** → 같은 이미지를 **N번 카운트**(handshake `prior_diff` N배 차감)·bank desync. ← *이게 사실 더 큰 위협이고, 메타와 별개.*
+- **`cdc_bit_sync` — Level 신호용 (2-FF)**: `enable`(CSR 100 → datapath). 천천히 바뀌는 레벨 → **메타 resolve만**.
+  ```verilog
+  (* ASYNC_REG="TRUE" *) reg [1:0] sync;
+  sync <= {sync[0], d_in};   // d_out = sync[1]
+  ```
+- **`cdc_pulse_sync` — Pulse(1-cycle) 신호용 (toggle 인코딩 + 2-FF + XOR 복원)**: `start`/`img_ready`(100→datapath), `img_done`/`input_consumed`(datapath→100, 양방향).
+  ```verilog
+  if (pulse_in) tgl <= ~tgl;             // src: event = toggle edge (레벨로 인코딩)
+  sync0<=tgl; sync1<=sync0; sync2<=sync1; // dst: 2-FF 동기 + 1지연
+  pulse_out = sync1 ^ sync2;             // XOR로 1-cycle pulse 복원
+  ```
+  → **펄스 폭(N배 카운트) + 메타를 동시에** 해결. 2-FF(메타 resolve)가 알맹이, toggle 래퍼가 펄스 의미 보존.
+- **세 갈래 정리**: ① level → `cdc_bit_sync`, ② pulse → `cdc_pulse_sync`, ③ **multi-bit 버스(BMG write) → 동기화기 불가**(비트별 resolve 시점 달라 깨짐) **→ XDC `set_max_delay`로 처리**. → CDC 표면적이 **1-bit 5개뿐**이라 검증이 쉬웠던 게 핵심.
 
 **(c) MMCM 함정 — "188 MHz는 존재하지 않는다"** (스토리의 1차 반전)
 - clk_wiz(MMCM)에서 `clk_out1=100` + `clk_out2=200`(MIG IDELAYCTRL ref)이 **VCO 주파수를 고정**한다. 그러면 `clk_out3`는 그 VCO의 **정수 분주**만 가능 → 실제로 낼 수 있는 값은 **{200, 171.4, 166.7, 150, …}의 이산 집합**.
@@ -246,6 +206,7 @@
 - **"phys_opt가 재현되나?"** → interactive 결과라 그 in-memory design에서 바로 write_bitstream하거나, impl strategy에 AggressiveExplore post-route phys_opt를 넣어야 함(안 넣고 impl 재실행 시 −0.098 복귀). ← 함정 언급하면 가산점.
 - **"왜 dual-clock인가, 전체를 300으로 올리면?"** → MicroBlaze/AXI/MIG는 암호화 고정 IP라 −1 등급에서 200도 못 닫음(UG984 best 267, 같은 보드 tutorial 200 fail) → 가속기 datapath만 분리.
 - **"XDC는 왜 손댔나?"** → 도메인 경계 경로를 STA가 기본 분석하면 가짜 violation이 떠서 timing이 안 닫힌다. 경계를 어떻게 볼지 알려줘 닫히게 + 데이터 무결성 보장(write-bus는 max_delay로 여전히 bound, async 선언은 금지).
+- **"위상 정렬되면 동기화기는 왜 필요?"** → 위상 정렬은 *데이터 버스*엔 충분(그래서 BRAM은 common-clock 그대로). 동기화기는 ① 잔여 메타(지터/coincident-edge) resolve + ② **1-cycle 펄스가 빠른 클럭에서 N번 카운트되는 펄스-폭 문제**(후자가 핵심) 때문 → `cdc_pulse_sync`의 toggle 인코딩이 그걸 막음.
 
 ---
 

@@ -113,16 +113,32 @@
 - 우리 clk_wiz는 `clk_out1=100` + `clk_out2=200`(MIG ref)이 **VCO를 고정** → 가속기용 `clk_out3`는 **정수 분주만** = **{200, 171.4, 166.7, 150…} 이산 집합**.
 - → **188을 요청해도 200으로 스냅.** 임의 주파수 ❌. (요청클럭 ≠ 실제클럭이면 silent fail 가능 → **positive WNS @ slow corner**만 신뢰.)
 
-**(4) Clock Wizard 설정** — `clk_out3`(가속기 clk) 추가, `clk_out1`=가속기 aclk(100) 재사용. 별도 300용 proc_sys_reset 불필요(내부에서 재동기화). **[발표: clk_wiz *Output Clocks* 탭 캡처 삽입]**
+**(4) Clock Wizard 설정** — *Output Clocks* 탭에서 `clk_out3` 활성화(Requested = 가속기 목표 주파수), `NUM_OUT_CLKS` 2→3. `clk_out1`(100)·`clk_out2`(200 MIG ref)·reset(ACTIVE_LOW)·locked는 유지. 가속기 `clk`→clk_out3, `aclk`→clk_out1(= aclk 재사용). resetn은 100 도메인 그대로 → **별도 300용 proc_sys_reset 불필요**(가속기 내부서 재동기화). **[발표: clk_wiz Output Clocks 탭 캡처 삽입]**
 
 **(5) XDC 제약 — 왜 필요한가 (20초 포인트)**
 - 도메인을 둘로 나누면 100↔datapath **경계 경로**가 생기는데, STA가 기본적으로 이걸 *목적지 클럭 1주기 안에* 닫으라 요구 → **멀쩡한 경로가 가짜 violation** → timing 안 닫힘(빌드 FAIL).
-- → write-bus(100→datapath, 실데이터) `set_max_delay -datapath_only`(비정수비 1.9:1에도 비율 무관·안전; multicycle은 부적합), CDC 동기화기 입력(datapath→100) `set_false_path`. 데이터 무결성은 max_delay로 여전히 bound(async 선언 금지). **[XDC append 부분 캡처 삽입]**
+- 실제 제약 (`Arty-a7-100-Master_v2.xdc` 끝에 append):
+  ```tcl
+  set_max_delay -datapath_only 10.0 -from $CLK100 -to $CLK_ACC   ;# write-bus(실데이터): 경로 ≤ 1 slow period
+  set_false_path               -from $CLK_ACC -to $CLK100        ;# CDC 동기화기 입력(toggle)
+  ```
+  - write-bus는 `set_max_delay`(비정수비 1.9:1에도 비율 무관·idempotent해 안전; 정수비 2:1이면 `set_multicycle_path -setup 2 -hold 1`도 가능, multicycle은 비정수비에 부적합).
+  - 데이터 무결성은 max_delay로 **여전히 bound** → `set_clock_groups -asynchronous` **금지**(async로 풀면 write-bus가 false-path 돼 무결성 사라짐). **[XDC append 부분 캡처 삽입]**
 
-**(6) CDC 코드 2개 — 역할 / 위치**
+**(6) CDC 코드 2개 — 역할 / 위치** (`RTL/core/cdc_bit_sync.v`, `cdc_pulse_sync.v`)
 > 모든 CDC는 top `cnn_accelerator.v` **경계에만** 격리 → 엔진(conv1/2·maxpool·fc)·CSR·firmware 무변경. 신호 종류별로 처리가 갈린다.
-- **`cdc_bit_sync` (2-FF, Level용)** — `enable`. 천천히 바뀌는 레벨 → **2-FF로 메타 resolve만**.
-- **`cdc_pulse_sync` (toggle 인코딩 + 2-FF + XOR, Pulse용)** — `start`/`img_ready`(100→fast), `img_done`/`input_consumed`(fast→100, 양방향). 펄스를 toggle 레벨로 인코딩 → 2-FF 동기 → XOR로 1-cycle 복원. → **① 펄스 폭 문제(1-cycle이 빠른 클럭에서 N번 카운트 → 같은 이미지 N번/bank desync) + ② 메타**를 동시에 해결. (위상 정렬돼도 ①은 남아서 동기화기가 필요한 이유.)
+- **`cdc_bit_sync` (2-FF, Level용)** — `enable`(CSR 100→fast). 천천히 바뀌는 레벨 → **2-FF로 메타 resolve만**.
+  ```verilog
+  (* ASYNC_REG="TRUE" *) reg [1:0] sync;
+  always @(posedge dst_clk) sync <= {sync[0], d_in};   // d_out = sync[1]
+  ```
+- **`cdc_pulse_sync` (toggle 인코딩 + 2-FF + XOR, Pulse용)** — `start`/`img_ready`(100→fast), `img_done`/`input_consumed`(fast→100, 양방향).
+  ```verilog
+  if (pulse_in) tgl <= ~tgl;              // src: 이벤트 → toggle (레벨로 인코딩)
+  sync0<=tgl; sync1<=sync0; sync2<=sync1; // dst: 2-FF 동기 + 1지연
+  pulse_out = sync1 ^ sync2;              // XOR로 1-cycle pulse 복원
+  ```
+  → **① 펄스 폭 문제(1-cycle이 빠른 클럭에서 N번 카운트 → 같은 이미지 N번 처리/bank desync) + ② 메타**를 동시에 해결. (위상 정렬돼도 ①은 남아서 동기화기가 필요한 이유.)
 - **위치 = 경계 5개 인스턴스**: 입력측 `u_enable_sync`(bit) / `u_start_sync` / `u_imgready_sync`(pulse), 출력측 `u_imgdone_sync` / `u_inputcons_sync`(pulse). **multi-bit 버스(BMG write)는 동기화기 불가 → (5) XDC가 담당.**
 - **검증으로 CDC 무죄 확정**: 듀얼클럭 TB `tb_system_axi_multi_2clk` 10/10(3배카운트/펄스손실/데드락 없음) + `report_clock_interaction` → 이후 타이밍 문제는 전부 **datapath 내부(intra-clock)**로 좁힘.
 
@@ -137,8 +153,13 @@
 
 **(b) 300 1차 시도 — conv2 broadcast fanout (route 지배)**  → 근거: [[02_300mhz_conv2-broadcast_wns-2.99.txt]]
 - 300 합성 **WNS −2.99**, 전부 datapath intra-clock. 워스트 **route 86% / logic 14%**, DSP None → **연산이 아니라 배선 거리 문제**.
-- 원인: 제어/weight broadcast(`state`/`sel`/`pe_en`/`packed_w`)가 **192 PE로 fanout**, DSP **226/240=94%**라 die 전역 → die-spanning.
-- 레버 누적: `max_fanout=32` + `phys_opt AggressiveFanoutOpt` → **−2.454** [[03_300mhz_step1-replication_wns-2.454.png]] → Step1b(weight +1reg) + Step2(`PE_BC_DELAY` PE입력 파이프) + weight_loader nested-mul→accumulator(조합깊이 6→1) → **−2.187** [[03_300mhz_step1b-step2_wns-2.187.png]] (weight-load 격리 실험 [[03_300mhz_weightreg-falsepath-isolation.txt]]). iverilog **40/40 bit-exact**(N=0→1798/1→1799/2→1800 cyc/img).
+- 원인: 제어/weight broadcast(`state`/`sel`/`pe_en`/`pe_id`/`packed_w`)가 **192 PE로 fanout**, DSP **226/240=94%**라 PE가 die 전역 DSP 컬럼에 깔려 die-spanning. DSP 위치 고정 → floorplan 불가 → **복제+파이프라인이 유일 레버**.
+- 레버 (누적):
+  - **Step1** `(*max_fanout=32*)` on conv2_fsm `state`/`kw_cnt`, weight_loader `pe_id`/`slot_id`/`pe_load_en` + impl `phys_opt -directive AggressiveFanoutOpt` → −2.99 → **−2.454**(~173 MHz) [[03_300mhz_step1-replication_wns-2.454.png]]. (복제만으론 부족.)
+  - **Step1b** weight broadcast +1 register(`pe_load_en_dec`/`packed_w`/`slot_id`→`_r`; weight-load 1회성이라 compute **cycle-neutral**) + **Step2** `parameter PE_BC_DELAY`(기본 1): PE 입력단(`sel`/`pe_en`/`pe_x`)에 +N register 복제 → broadcast가 PE 클러스터 근처 replica에서 출발, conv2_fsm `DRAIN_LAST=11+N`로 정합 → **−2.187** [[03_300mhz_step1b-step2_wns-2.187.png]].
+  - **weight_loader nested-multiply → accumulator**: 주소/pe_id의 `(((oc·8)+ic)·3+kh)·3+kw` **6-level CARRY4**를 `addr_seq`/`pe_id_seq` 단조증가 accumulator(+1)로 → 조합깊이 **6→1**.
+  - (weight-load 격리 실험: `set_false_path -to *w_regs_reg*` 후에도 −2.72 잔존 → 워스트가 weight-load 한 곳이 아니라 broadcast 전반임을 확인 [[03_300mhz_weightreg-falsepath-isolation.txt]].)
+- 검증: iverilog `tb_cnn_accelerator_multi` **40/40 bit-exact** (`PE_BC_DELAY` N=0→1798 / 1→1799 / 2→1800 cyc/img — 정확히 +N/img).
 
 **(c) 300 → 점진적 전략으로 전환 (시간 이슈)**
 - 300 한 방을 노렸지만, broadcast를 닫아도 die 전역 워스트(reset −1.94 + 다전선 tier)가 남아 **전부 닫는 데 시간이 많이 드는** 상황.
@@ -184,7 +205,7 @@
 - **150: 0.128 s → 200: 108.9 ms**(10,896,290 cyc, WNS +0.011) → **+ Vitis feed-overlap: 98 ms**(9,799,994 cyc, in-CDMA 56%). baseline 0.188 s 대비 **1.72×**.
 - **2×가 아닌 이유**: profile상 **in-CDMA(blocking) 72%**(7.9M cyc)가 **100 MHz feed 도메인**(가속기 클럭 무관) → 가속기 2×는 **compute slice만** 압축. **floor = CDMA feed** → ① feed overlap(이미 98 ms로 일부 회수), ② **Complex Winograd**(4장, compute 자체를 줄여 feed 푼 뒤 효과).
 
-### ③ 핵심 수치/그림 (자료는 이미 repo에 있음)
+### ③ 핵심 수치/그림
 - **WNS 진행 표**: −2.99 → −2.454 → −2.187 → (reset)−0.154 → −0.102 → −0.098 → **+0.011**.
 - **route% vs logic% 막대**(86% vs 14%) — "배선이 문제" 한 장.
 - **fanout 41323 → 복제 트리**(rst_sync→l1→leaf→41k) 그림.

@@ -140,14 +140,13 @@
 - 원인: 제어/weight broadcast(`state`/`sel`/`pe_en`/`packed_w`)가 **192 PE로 fanout**, DSP **226/240=94%**라 die 전역 → die-spanning.
 - 레버 누적: `max_fanout=32` + `phys_opt AggressiveFanoutOpt` → **−2.454** [[03_300mhz_step1-replication_wns-2.454.png]] → Step1b(weight +1reg) + Step2(`PE_BC_DELAY` PE입력 파이프) + weight_loader nested-mul→accumulator(조합깊이 6→1) → **−2.187** [[03_300mhz_step1b-step2_wns-2.187.png]] (weight-load 격리 실험 [[03_300mhz_weightreg-falsepath-isolation.txt]]). iverilog **40/40 bit-exact**(N=0→1798/1→1799/2→1800 cyc/img).
 
-**(c) 300 포기 결정 — 왜 (정직한 ROI 판단)**
-- broadcast를 닫아도 워스트엔 **reset net −1.94** + **OTHER 다전선 tier −1.6~−1.7**(FC FSM `pair_cnt`/`s_cnt`→state, conv2 `state`→pe_x, broadcast 잔여→DSP, `rdone`→conv1 handshake)가 **die 전역**으로 남는다.
-- 이들 경로의 **물리 지연 ≈ 5.0~5.5 ns** = **≈190~200 MHz급**. 300(3.33 ns)으로 닫으려면 이 **무리 전부를 각 ~1.7 ns씩 더** 내려야 하는데, **DSP 94%라 floorplan 여지 없고**(placer가 클러스터 못 모음) 각 fix가 FC FSM 재설계·handshake 재구성처럼 침습적 → **비현실적 ROI**.
-- → **결정: 300 보류, 일단 클럭을 낮춰 깨끗이 닫자.** (★주의: reset이 die 전역이라 "**못 푼다**"가 아니라 — *300까진* 못 내린다는 판단. 200에서 reset은 **실제로 푼다** = Ⅳ. 이 구분이 다음 블록의 핵심.)
+**(c) 300 → 점진적 전략으로 전환 (시간 이슈)**
+- 300 한 방을 노렸지만, broadcast를 닫아도 die 전역 워스트(reset −1.94 + 다전선 tier)가 남아 **전부 닫는 데 시간이 많이 드는** 상황.
+- → **전략 전환: 300 moonshot 대신 클럭을 점진적으로 올린다 (100 → 150 → 200).** 한 번에 한 tier씩 닫으며 안전하게 전진, 300은 **시간 제약상 보류**(불가능 판정 아님 — 그 위 추가 가속은 클럭보다 알고리즘(Winograd)이 더 나은 레버라는 판단도 함께).
 
 **(d) 150 closure — 왜 150은 그냥 닫히나 (핵심 직관)**
 - die-spanning 경로엔 **고정 물리 지연**(≈5.0~5.5 ns). **150 = 6.67 ns 주기**라 이 경로들이 **추가 묘수 없이 그냥 fit** → clean, **HW 10000/10000, 0.128 s**(`150MHz_result.png`).
-- 이 "**물리 지연(≈5 ns) vs 클럭 주기**" 프레임이 전부를 설명: 150(6.67) 여유 / 200(5.0) 빠듯(reset만 짧게 하면 닫힘) / 300(3.33) 전 tier 못 내림. → 다음 블록 = 이 5 ns tier를 **5.0 ns 밑으로** 내리는 싸움.
+- 이 "**물리 지연(≈5 ns) vs 클럭 주기**" 프레임이 핵심: 150(6.67) 여유 / 200(5.0) 빠듯(reset만 짧게 하면 닫힘). → 다음 블록 = 이 5 ns tier를 **5.0 ns 밑으로** 내리는 싸움.
 
 ---
 #### Ⅳ. 150 → 200 MHz — 5 ns tier를 5.0 ns 밑으로 (상세)
@@ -200,10 +199,10 @@
 - **S3**: WNS 진행 표(한 줄씩 애니메이션) → **+0.011 MET**.
 - **S4**: argmax 9단 직렬 → 4-round 토너먼트(Ⅲ-a, 150 이전 정지작업, 작은 임팩트 카드).
 - **S5**: 실측 사진 2장 + "왜 1.72×인가 = CDMA feed 72%".
-- **말로만**: Ⅱ-(6) CDC 무죄, Ⅱ-(3) MMCM 스냅 훅("188은 존재하지 않았다"). **Ⅲ-(c) 왜 300 포기**는 백업 1장(Q&A 대비). 시간 빡세면 S4는 한 문장.
+- **말로만**: Ⅱ-(6) CDC 무죄, Ⅱ-(3) MMCM 스냅 훅("188은 존재하지 않았다"). **Ⅲ-(c) 300→점진 전략 전환**은 한 줄. 시간 빡세면 S4는 한 문장.
 
 ### ⑤ 예상 질문 (Q&A 대비)
-- **"왜 300이 아니라 200? reset 풀었으면 300도 되지 않나?"** → Ⅲ-(c)·Ⅳ-(a) 참고. reset 트리는 reset을 **5.0 ns(200) 밑으로** 내린 것이지 3.33 ns(300)가 아님 + reset은 최악 하나일 뿐, 그 아래 FC FSM/conv2 제어→DSP/handshake 등 **~5 ns die-spanning 무리**(="~200 벽")가 더 있음. 300은 그걸 전부 침습적으로 더 내려야 하고 DSP 94%라 floorplan 불가 → ROI 붕괴 → Winograd로 전환.
+- **"왜 300이 아니라 200?"** → 300 한 방 대신 **점진적 전략(100→150→200)**으로 전환(시간 제약). 200까지 안전하게 닫고, 그 위 추가 가속은 클럭이 아니라 **알고리즘(Winograd)**이 더 나은 레버라 판단. (reset을 200에서 실제로 닫았으니 300이 원천 불가는 아님.)
 - **"max_fanout 복제가 기능을 바꾸나?"** → 아니다. attribute-only, iverilog 40/40 bit-exact. reset은 async-assert/sync-deassert로 스큐 0 투명. (DSP 모델에 initial 없어 X-leak까지 잡았다.)
 - **"왜 2배 안 빨라지나?"** → in-CDMA(blocking) 72%가 100 MHz feed 도메인(클럭 무관) → 가속기 2×는 compute만 압축.
 - **"phys_opt가 재현되나?"** → interactive 결과라 그 in-memory design에서 바로 write_bitstream하거나, impl strategy에 AggressiveExplore post-route phys_opt를 넣어야 함(안 넣고 impl 재실행 시 −0.098 복귀). ← 함정 언급하면 가산점.
@@ -218,70 +217,64 @@
 ### ① 한 줄 메시지
 > "클럭은 MMCM 한계로 200MHz가 max → 다음 레버는 **알고리즘**. 점 집합 `{0, ±1, ±i, ∞}`의 **복소수 Winograd F(4×4,3×3)**로 Conv2 곱셈을 **144→46 (3.13×)**. 표준 실수 F(4,3)의 `1/24` 분수(=INT8 손실)를 **복소수로 회피**해 **direct conv와 bit-exact**. (Complex F(4,3) 유도까지가 본인 기여 — prior work는 있으나 이 INT8 무손실 구성은 독자.)"
 
-### ② 발표 논리 (수학 → HW 순. 깊게.)
+### ② 발표 논리 — 도출 → 검증 → 이론 예측
 
-**(a) Winograd 기본 아이디어 (빠르게)**
-- `2D: Y = Aᵀ[(G·g·Gᵀ) ⊙ (Bᵀ·d·B)]A`, ⊙ = element-wise(실제 곱셈 발생 위치).
-- 배경: **CRT / Lagrange 보간**으로 다항식 곱을 적은 곱셈으로 — 점에서 평가(작은 곱) 후 보간으로 복원. (언급만 하고 빠르게.)
-- `F(m,n)` 의미: m×m 출력, n×n 필터를 한 tile에 — 1D 곱셈 `m+n−1`, 2D `(m+n−1)²`.
-- 2D 적용: `F(m×m, n×n)`. → 곱셈 절감률이 핵심 지표.
+> **본 장 범위 (못 박기)**: 알고리즘 **도출(본인 기여)** → **golden bit-exact 검증(테스트벤치)** → **이론적 200 MHz 1만 장 latency 예측**까지. **RTL 구현·보드 성능은 미포함**(향후 과제, "not include performance"). PE / PE array / DSP *배치 일반론*은 **중간(아키텍처) 파트**에서 다루므로 여기선 **Winograd 특화 부분만**.
 
-**(b) F(2,3)으로 감 잡기**
-- `F(2×2,3×3)`: 2D 곱셈 36→**16 (2.25×)**. G 원소 `{0,±1,±½}` — ½ 하나뿐, INT8에서도 무난.
-- 더 키우면(F(4,3)) 절감률↑ 이지만 **문제 발생** → 다음.
+---
+#### Ⅰ. Winograd 기본 아이디어 (빠르게)
+- `2D: Y = Aᵀ[(G·g·Gᵀ) ⊙ (Bᵀ·d·B)]A`, ⊙ = element-wise(**실제 곱셈 발생 위치**).
+- 배경: **CRT / Lagrange 보간**으로 다항식 곱을 적은 곱셈에 — 점에서 평가(작은 곱) 후 보간 복원. (언급만 하고 빠르게.)
+- `F(m,n)`: m×m 출력 · n×n 필터를 한 tile에 — 1D 곱셈 `m+n−1`, 2D `(m+n−1)²`. → **곱셈 절감률**이 핵심 지표.
 
-**(c) 표준 실수 F(4,3)의 문제**
-- 점 `{0,±1,±2,∞}` → Lagrange 분모 `∏(αₖ−αⱼ)`가 불균일(거리 1,2,3,4) → **`1/24, 1/12, 1/6` 분수** 등장.
-- **INT8 치명적**: `1/24`가 양자화 그리드에 안 떨어짐 → 누적 오차. (FP32는 무손실이지만 우리는 INT8.) → 표준 실수 F(4,3) **부적합**.
+---
+#### Ⅱ. 왜 복소수 Winograd인가 (본인 핵심 기여)
+**(a) F(2,3)으로 감 잡기** — `F(2×2,3×3)`: 2D 곱셈 36→**16 (2.25×)**. G `{0,±1,±½}` (½ 하나뿐, INT8 무난). 더 키우면(F(4,3)) 절감↑ 이지만 **문제 발생**.
 
-**(d) 해결 아이디어 — 보간 계수를 복소수로** (본인 핵심 기여)
-- **관찰**: 4차 단위근 `{1,i,−1,−i}`는 서로 거리가 **모두 √2로 균일** → 분모가 깔끔한 `{1,4}`(2의 거듭제곱)만.
-- 점 집합 `{0, 1, −1, i, −i, ∞}` (6점 = m+r−1 = 4+3−1).
-- **켤레 대칭**(공짜 절감): 실수 입력/필터를 복소점에서 평가하면 `g(−i)=conj(g(i))`, `d(−i)=conj(d(i))` → `i`만 계산하면 `−i`는 켤레로 자동.
-- **변환 행렬**(정정판, golden 검증):
-  - **G** `{0,±1,±i}` (필터), **Bᵀ** `{0,±1,±i,±4}` (입력, ¼스케일 흡수), **Aᵀ** `{0,±1,±i}` (출력) — **전부 Gaussian integer, 곱셈기 0개**(시프트+부호+i-swap+×4).
-  - ¼(2D는 1/16) 스케일은 weight가 아니라 **출력 shift**로 흡수 → `result = sat((Aᵀ·M·A) >> 14) = sat(Y>>10)` **= direct conv와 완전 동일값**.
-- **결과**: G/B/A 정수 + 곱·누적 정수 + 출력 shift 정확 → **bit-exact**. (실수 F(4,3)의 1/24 반올림 문제를 복소수로 회피한 게 이 변환을 쓰는 유일한 이유.)
+**(b) 표준 실수 F(4,3)의 문제** — 점 `{0,±1,±2,∞}` → Lagrange 분모가 불균일(거리 1,2,3,4) → **`1/24, 1/12, 1/6` 분수**. **INT8 치명적**: `1/24`가 양자화 그리드에 안 떨어져 누적 오차 → 표준 실수 F(4,3) **부적합**.
 
-**(e) 곱셈 절감 정밀 계산**
-- 1D: 실수점 4개(4 mul) + 켤레쌍 `{i,−i}` 1개(Gauss 3 mul) = **7 mul** (직접 12 → 1.71×).
-- 2D 36점 분류: (real,real)16×1 + (real,cplx)4×3 + (cplx,real)4×3 + (cplx,cplx)2×3 = **46 mul** (직접 144 → **3.13×**).
-- 핵심 통찰: `β=i` 차원이면 (real α, complex β)에서도 U,V가 복소수 → 그래서 복소 곱이 늘지만, 켤레+Gauss로 46에 수렴.
+**(c) 해결 — 보간 계수를 복소수로** ⭐본인 기여
+- **관찰**: 4차 단위근 `{1,i,−1,−i}`는 서로 거리 **모두 √2 균일** → 분모가 깔끔한 `{1,4}`(2의 거듭제곱)만.
+- 점 집합 `{0, 1, −1, i, −i, ∞}` (6점 = m+r−1). **켤레 대칭**(공짜): `g(−i)=conj(g(i))`, `d(−i)=conj(d(i))` → `i`만 계산, `−i`는 켤레로 자동.
+- **변환 행렬**(golden 정정판): G `{0,±1,±i}`, Bᵀ `{0,±1,±i,±4}`, Aᵀ `{0,±1,±i}` — **전부 Gaussian integer, 곱셈기 0개**(shift+부호+i-swap+×4). ¼(2D는 1/16) 스케일은 weight가 아니라 **출력 shift**로 흡수 → `sat((Aᵀ·M·A)>>14) = sat(Y>>10)` **= direct conv와 완전 동일값**.
+- → **bit-exact**. (실수 F(4,3)의 1/24 반올림을 복소수로 회피한 게 이 변환을 쓰는 유일한 이유.)
 
-**(f) Gauss 복소수 곱셈 (4 mul → 3 mul)**
-- `(a+bi)(c+di) = (ac−bd) + (ad+bc)i`.
-- naive 4 real mul → **Gauss trick 3 real mul**:
-  - `k₁=a(c+d)`, `k₂=c(b−a)`, `k₃=d(a+b)` → `Re=k₁−k₃`, `Im=k₁+k₂`.
-- 이 3-mul이 복소점 곱셈마다 적용되어 46의 근거.
+---
+#### Ⅲ. 곱셈 절감 — 144 → 46 (3.13×)
+- **1D**: 실수점 4개(4 mul) + 켤레쌍 `{i,−i}` 1개(Gauss 3 mul) = **7 mul** (직접 12 → 1.71×).
+- **2D 36점 분류**: (real,real)16×1 + (real,cplx)4×3 + (cplx,real)4×3 + (cplx,cplx)2×3 = **46 mul** (직접 144 → **3.13×**). 통찰: `β=i`면 (real α, complex β)에서도 복소수 → 켤레+Gauss로 46에 수렴.
+- **Gauss 복소수 곱 (4→3 mul)**: `(a+bi)(c+di)`를 `k₁=a(c+d), k₂=c(b−a), k₃=d(a+b)` → `Re=k₁−k₃, Im=k₁+k₂`. 복소점마다 이 3-mul → 46의 근거.
 
-**(g) HW 매핑 — DSP 분배 (184 = 46 × 4)**
-- 변환 모듈(입력 `Bᵀ·d·B` / 출력 `Aᵀ·M·A`)은 **곱셈기 0개**(adder/shift만).
-- element-wise mul array만 DSP: **46-unit × IC=4 = 184 DSP** (utilization 100%).
-  - 한 cycle: 4 IC × 46 = 184 mul → 한 (OC,tile) 8IC = 2 cycle → 16 OC × 36 tile = **1,152 cycle compute**.
-  - Winograd는 변환 후 12-bit라 **SIMD packing 불가**(Aport 36-bit > 25-bit) → DSP 1개에 곱 1개.
-- weight `U=G·g·Gᵀ` 사전계산(INT12, ~18KB, BRAM 1개).
-- **2-파트가 한 세트**: conv2만 Winograd하면 conv1(1634)이 새 병목 → conv2 비는 DSP를 conv1에 줘(18→36) 1634→837. 그래야 conv2-wino(~1324)가 병목 되어 전체 효과.
+---
+#### Ⅳ. 검증 — golden bit-exact (= 테스트벤치)
+- `scripts/golden_sim/1_complex_winograd_f(4,3).py`: **direct conv == complex-Winograd conv == `output.npy`**, err **5e-16**, **전체 10000장 bit-exact 100%**.
+- 즉 이 변환이 **정수 산술만으로 direct conv과 완전히 동일값**임을 증명(¼/16 스케일을 출력 `>>14`로 흡수). → RTL을 짜면 이 golden이 그대로 **bit-exact gate**(overclock 때와 동일한 sim-first 규율).
+- (발표: "테스트벤치 = golden 1만 장 bit-exact" 한 줄 + err 5e-16 캡처.)
 
-**(h) 예상 성능 (이론)**
-- bottleneck: 1798 → ~1324 cyc/img. @200MHz **~66–67 ms** (compute-only floor). DSP 238/240.
-- **현재 상태**: golden(`scripts/golden_sim/1_complex_winograd_f(4,3).py`) **전체 10000장 bit-exact 완료**, RTL 미착수 → "이론상 이렇게 된다 + testbench cycle 수 → 클럭 환산 → ms" 로 마무리.
+---
+#### Ⅴ. 이론적 성능 예측 (@200 MHz, 1만 장) — 본 장의 종착점
+- **DSP**: 변환 모듈은 **곱셈기 0개** → element-wise mul array만 DSP = **46-unit × IC=4 = 184 DSP**. → direct conv2 **192 → 184 (오히려 감소)**. (변환 후 12-bit라 SIMD packing 불가 = DSP 1개에 곱 1개. PE/array 일반 구조는 중간 파트.)
+- **Cycle**: 1 cycle 4 IC×46=184 mul → (OC,tile) 2 cycle → 16 OC×36 tile = **1,152 compute** + 변환/line-fill/drain ≈ **~1,324 cyc/img** (conv2 1798 → 1.36×).
+- **2-파트 세트**: conv2만 Winograd하면 conv1(1634)이 새 병목 → conv2가 비운 DSP를 conv1에(18→36) 1634→837 → conv2-wino(~1324)가 병목.
+- **Latency 예측 (testbench cycle → 클럭 환산)**: bottleneck **~1,324 cyc/img @200 MHz** → `1324 × 10000 / 200e6` ≈ **~66 ms** (compute-only floor).
+  - 마무리 멘트: "RTL은 향후 과제이나, **도출 + golden 검증**으로 **이론상 ~66 ms**(현 측정 98 ms 대비 추가 단축 여지)까지 보였다." (실제는 feed overlap 여하에 따라 그 사이.)
 
 ### ③ 핵심 수치/그림
-- `144 → 46 (3.13×)` 대문짝. 점 집합 `{0,±1,±i,∞}` 복소평면 그림(거리 √2 균일). 1/24 분수 문제 vs Gaussian integer 표(6.1 비교표). Gauss 3-mul 박스. 46×4=184 DSP 분배 그림. bottleneck 변화 표(1798→1324, conv1 1634→837). 예상 66–67 ms.
+- `144 → 46 (3.13×)` 대문짝. 점 집합 `{0,±1,±i,∞}` **복소평면 그림**(거리 √2 균일). 1/24 분수 vs Gaussian integer 비교표. Gauss 3-mul 박스. **DSP 192→184**(감소!) + 1798→~1324 cyc 표. golden **10000장 bit-exact / err 5e-16** 캡처. **예상 ~66 ms**.
 
 ### ④ 슬라이드 (가볍게)
-- 슬라이드 1: "클럭은 끝났다 → 이제 곱셈 자체를 줄인다" + `144→46`.
-- 슬라이드 2: **핵심 아이디어 한 장** — 복소평면 `{0,±1,±i,∞}` + "1/24 분수를 복소수로 회피 → INT8 bit-exact". (유도 디테일은 말로, 행렬은 부록.)
-- 슬라이드 3: Gauss 3-mul + "46 mul" 한 장.
-- 슬라이드 4: 184 DSP 분배 + conv1 rebalance + **예상 66–67 ms**.
-- 행렬 전체/Lagrange 유도/비트폭 분석은 **부록 슬라이드**(질문 대비).
+- **S1**: "클럭은 200이 한계 → 이제 곱셈 자체를 줄인다" + `144→46`.
+- **S2 (핵심 한 장)**: 복소평면 `{0,±1,±i,∞}` + "1/24 분수를 복소수로 회피 → INT8 **bit-exact**". (유도/행렬은 부록.)
+- **S3**: Gauss 3-mul + "46 mul, DSP 192→184".
+- **S4 (종착점)**: golden 1만 장 bit-exact + **이론 ~66 ms** (cycle→클럭 환산). "RTL 향후 과제" 한 줄.
+- 행렬 전체 / Lagrange 유도 / 비트폭 분석은 **부록**(질문 대비).
 
 ### ⑤ 예상 질문
-- "왜 실수 F(4,3) 안 쓰고 복소수?" → 1/24 분수가 INT8에서 손실, 복소수는 분모가 {1,4}라 무손실.
-- "복소수 곱이 더 비싸지 않나?" → 켤레 대칭 + Gauss 3-mul로 46에 수렴(직접 144 대비 3.13×).
-- "왜 SIMD packing 못 쓰나?" → 변환 후 12-bit라 Aport 36-bit > 25-bit 한도.
-- "prior work와 차이?" → Winograd/Lavin-Gray·복소 Winograd 개념은 있으나, **INT8 bit-exact를 위해 ¼을 출력 shift로 흡수하고 {0,±1,±i,±4}로 정수화한 이 구성**이 본인 기여. F(4,3) 도출·10000장 golden 검증까지 직접.
-- "RTL 됐나?" → golden bit-exact 완료, RTL은 진행 예정(이론 성능 제시).
+- "왜 실수 F(4,3) 안 쓰고 복소수?" → 1/24 분수가 INT8 손실, 복소수는 분모 {1,4}라 무손실.
+- "복소수 곱이 더 비싸지 않나?" → 켤레 + Gauss 3-mul로 46 수렴(직접 144 대비 3.13×).
+- "DSP 늘어나지 않나?" → 오히려 **192→184 감소**(변환은 곱셈기 0개). 단 변환 가산망 LUT는 늘어남.
+- "prior work와 차이?" → Winograd/Lavin-Gray·복소 Winograd 개념은 있으나, **INT8 bit-exact를 위해 ¼을 출력 shift로 흡수하고 {0,±1,±i,±4}로 정수화한 이 구성 + F(4,3) 도출 + 10000장 golden 검증**이 본인 기여.
+- "RTL 됐나? / 보드 수치는?" → **본 발표 범위는 도출+검증+이론까지**(성능 미포함). RTL은 향후 — golden이 bit-exact gate로 준비됨.
 
 ---
 

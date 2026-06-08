@@ -219,7 +219,7 @@
 
 ### ② 발표 논리 — 도출 → 검증 → 이론 예측
 
-> **본 장 범위 (못 박기)**: 알고리즘 **도출(본인 기여)** → **golden bit-exact 검증(테스트벤치)** → **이론적 200 MHz 1만 장 latency 예측**까지. **RTL 구현·보드 성능은 미포함**(향후 과제, "not include performance"). PE / PE array / DSP *배치 일반론*은 **중간(아키텍처) 파트**에서 다루므로 여기선 **Winograd 특화 부분만**.
+> **본 장 흐름 (못 박기)**: 알고리즘 **도출(본인 기여)** → **RTL 설계**(engine 구조 · PE · PE array · DSP 배치 — 본 장의 중간) → **golden bit-exact 검증(테스트벤치)** → **이론적 200 MHz 1만 장 latency 예측**. **보드 실측 성능은 미포함**(RTL 구현은 향후 과제 — "not include performance"). 즉 *설계*는 보이되 *측정*은 이론까지.
 
 ---
 #### Ⅰ. Winograd 기본 아이디어 (빠르게)
@@ -246,18 +246,29 @@
 - **Gauss 복소수 곱 (4→3 mul)**: `(a+bi)(c+di)`를 `k₁=a(c+d), k₂=c(b−a), k₃=d(a+b)` → `Re=k₁−k₃, Im=k₁+k₂`. 복소점마다 이 3-mul → 46의 근거.
 
 ---
-#### Ⅳ. 검증 — golden bit-exact (= 테스트벤치)
+#### Ⅳ. RTL 설계 — engine 구조 · PE · PE array · DSP 배치 (본 장의 중간)
+> 설계서 `docs/winograd/conv2_winograd_design.md`. direct conv2 자리에 **drop-in**(동일 c1c2 입력·c2pool 출력·handshake) → 주변(conv1/maxpool/FSM) 무변경, **weight 경로만** 교체.
+
+- **Datapath**: `c1c2 → line buffer ×5~6 → 6×6 tile → [입력변환 V=Bᵀ·d·B, 곱셈기 0] → [element-wise M=Σ_IC U⊙V, 184 DSP] → [출력변환 Y=Aᵀ·M·A, 곱셈기 0] → sat(>>14)+ReLU → c2pool`. (변환 모듈 = add/shift/negate/i-swap만, **DSP 0개**.)
+- **PE = 복소수 곱 유닛(`wino_pe_mul`)**: Gauss **3-mul**(12b×12b→24b). 변환 후 12-bit라 **SIMD packing 불가**(Aport 36b>25b) → **DSP 1개 = 실수곱 1개**.
+- **PE array = `wino_mul_array`**: **46-unit × IC=4 = 184 DSP** (util 100%). 1 cycle에 4 IC × 46 = 184 mul.
+- **DSP 배치/분배**: (IC=4, OC=1, Tile=1) → **184 DSP**. direct conv2 192 → **184 (감소)**. + conv1 rebalance(18→36)까지 하면 총 **238/240**.
+- **Weight**: `U=G·g·Gᵀ` **오프라인 정수 사전계산**(G 정수라 반올림 0), INT12 ~18 KB, BRAM 1개. firmware는 새 헤더 direct write(broadcast loader 불필요).
+- **Tile line buffer**: 6×6, stride 4, overlap 2 → 6 line buffer × 26 col.
+- 모듈 분해: `wino_input_transform` / `wino_pe_mul` / `wino_mul_array` / `wino_output_transform` / `wino_tile_buffer` / `conv2_winograd_fsm` / `conv2_winograd_engine`(top, drop-in).
+
+---
+#### Ⅴ. 검증 — golden bit-exact (= 테스트벤치)
 - `scripts/golden_sim/1_complex_winograd_f(4,3).py`: **direct conv == complex-Winograd conv == `output.npy`**, err **5e-16**, **전체 10000장 bit-exact 100%**.
 - 즉 이 변환이 **정수 산술만으로 direct conv과 완전히 동일값**임을 증명(¼/16 스케일을 출력 `>>14`로 흡수). → RTL을 짜면 이 golden이 그대로 **bit-exact gate**(overclock 때와 동일한 sim-first 규율).
 - (발표: "테스트벤치 = golden 1만 장 bit-exact" 한 줄 + err 5e-16 캡처.)
 
 ---
-#### Ⅴ. 이론적 성능 예측 (@200 MHz, 1만 장) — 본 장의 종착점
-- **DSP**: 변환 모듈은 **곱셈기 0개** → element-wise mul array만 DSP = **46-unit × IC=4 = 184 DSP**. → direct conv2 **192 → 184 (오히려 감소)**. (변환 후 12-bit라 SIMD packing 불가 = DSP 1개에 곱 1개. PE/array 일반 구조는 중간 파트.)
-- **Cycle**: 1 cycle 4 IC×46=184 mul → (OC,tile) 2 cycle → 16 OC×36 tile = **1,152 compute** + 변환/line-fill/drain ≈ **~1,324 cyc/img** (conv2 1798 → 1.36×).
-- **2-파트 세트**: conv2만 Winograd하면 conv1(1634)이 새 병목 → conv2가 비운 DSP를 conv1에(18→36) 1634→837 → conv2-wino(~1324)가 병목.
+#### Ⅵ. 이론적 성능 예측 (@200 MHz, 1만 장) — 본 장의 종착점
+- **Cycle**: (OC,tile) 8 IC/4 = 2 cycle → tile(16 OC) = 32 cyc → 36 tile = **1,152 compute** + line-fill/변환/drain ≈ **~1,324 cyc/img** (conv2 1798 → 1.36×).
+- **2-파트 세트**: conv2만 Winograd하면 conv1(1634)이 새 병목 → conv1 DSP 18→36(1634→837) → conv2-wino(~1324)가 병목.
 - **Latency 예측 (testbench cycle → 클럭 환산)**: bottleneck **~1,324 cyc/img @200 MHz** → `1324 × 10000 / 200e6` ≈ **~66 ms** (compute-only floor).
-  - 마무리 멘트: "RTL은 향후 과제이나, **도출 + golden 검증**으로 **이론상 ~66 ms**(현 측정 98 ms 대비 추가 단축 여지)까지 보였다." (실제는 feed overlap 여하에 따라 그 사이.)
+  - 마무리 멘트: "RTL 보드 구현은 향후 과제이나, **도출 + 설계 + golden 검증**으로 **이론상 ~66 ms**(현 측정 98 ms 대비 추가 단축 여지)까지 보였다." (실제는 feed overlap 여하에 따라 그 사이.)
 
 ### ③ 핵심 수치/그림
 - `144 → 46 (3.13×)` 대문짝. 점 집합 `{0,±1,±i,∞}` **복소평면 그림**(거리 √2 균일). 1/24 분수 vs Gaussian integer 비교표. Gauss 3-mul 박스. **DSP 192→184**(감소!) + 1798→~1324 cyc 표. golden **10000장 bit-exact / err 5e-16** 캡처. **예상 ~66 ms**.
@@ -265,8 +276,9 @@
 ### ④ 슬라이드 (가볍게)
 - **S1**: "클럭은 200이 한계 → 이제 곱셈 자체를 줄인다" + `144→46`.
 - **S2 (핵심 한 장)**: 복소평면 `{0,±1,±i,∞}` + "1/24 분수를 복소수로 회피 → INT8 **bit-exact**". (유도/행렬은 부록.)
-- **S3**: Gauss 3-mul + "46 mul, DSP 192→184".
-- **S4 (종착점)**: golden 1만 장 bit-exact + **이론 ~66 ms** (cycle→클럭 환산). "RTL 향후 과제" 한 줄.
+- **S3**: Gauss 3-mul + "46 mul".
+- **S4 (RTL 설계·중간)**: datapath 그림(transform 곱셈기0 → **46×4=184 DSP** mul array → transform) + "DSP 192→**184 감소**". (모듈 분해는 말로.)
+- **S5 (종착점)**: golden 1만 장 bit-exact(err 5e-16) + **이론 ~66 ms**(cycle→클럭 환산). "RTL 보드 구현은 향후" 한 줄.
 - 행렬 전체 / Lagrange 유도 / 비트폭 분석은 **부록**(질문 대비).
 
 ### ⑤ 예상 질문

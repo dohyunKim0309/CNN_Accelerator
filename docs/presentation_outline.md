@@ -140,66 +140,110 @@
 
 ---
 
-# 3. Additional (1) — Overclock  〔담당: 김도현〕
+# 3. Additional (1) — Overclock (100 → 200 MHz)  〔담당: 김도현〕
+
+> 근거 문서: `docs/overclock_journey_100_to_200mhz.md`(서사·디버깅 로그), `docs/overclock_300mhz.md`(기술 레퍼런스),
+> `docs/timing/`(WNS 캡처), 실측: `docs/150MHz_result.png`·`docs/200MHz_result_vitis_optimize.png`.
 
 ### ① 한 줄 메시지
-> "같은 RTL을 **더 빠른 클럭**에서 돌리면 firmware 무변경으로 latency가 준다. 단 이 칩의 벽은 **로직 깊이가 아니라 die 전역으로 퍼지는 high-fanout net의 route delay** — 해법은 재설계가 아니라 **`max_fanout`으로 driver를 클러스터 근처에 복제**하는 것. 100→**200 MHz**, 187→**98 ms**."
+> "같은 RTL을 **더 빠른 클럭**에서 돌리면 firmware 한 줄 안 고치고 latency가 준다. 그런데 이 칩의 타이밍 벽은 **로직 깊이가 아니라, die 전역으로 퍼지는 high-fanout 제어/리셋 net의 route delay**였다. 해법은 로직 재설계가 아니라 **`max_fanout`으로 driver를 클러스터 근처에 복제**하는 것 — 한 줄짜리 처방. 100 → **200 MHz**, 187 → **108.9 ms**(+ Vitis feed-overlap **98 ms**)."
 
-### ② 발표 논리 (이 장이 당신 색깔이 가장 진한 곳 — 디버깅 서사로)
+### ② 발표 논리 — "병목을 측정 → 진단 → 닫는" 디버깅 서사 (이 장의 핵심)
 
-**(a) 왜 오버클럭인가 / 무엇을 안 건드리나**
-- 가속기 cycle 거동은 그대로 두고 클럭만 올리면 **wall-clock cycle 수가 줄어든다**(100MHz timer가 세는 값이 감소). **firmware 무변경**.
-- 선행 작업 **dual-clock CDC**: PS/AXI(100MHz)와 datapath(빠른 클럭) 분리.
-  - `enable`=2-FF level sync, `start`/`img_ready`=**toggle 동기화**(빠른 클럭에서 pulse가 N-cycle로 N배 카운트되는 것 방지).
-  - XDC: write-bus는 `set_max_delay -datapath_only`(비정수 클럭비에서 multicycle 부적합 → max_delay가 안전), 반대 방향 `set_false_path`.
-  - 듀얼클럭 TB(`tb_system_axi_multi_2clk`) 10/10 + `report_clock_interaction` → **"CDC 무죄" 일찌감치 확정** → 이후 디버깅을 datapath 내부에만 집중.
+> 이 장은 결과만 나열하지 말고 **"무엇이 병목이라고 생각했다가 틀렸고, 측정으로 어떻게 진짜 병목을 찾았는가"**의 추리물로 끌고 간다. 그게 이 작업의 진짜 기여.
 
-**(b) MMCM 함정 — "188 MHz는 존재하지 않는다"** (스토리의 반전 포인트)
-- clk_wiz의 `clk_out1=100`+`clk_out2=200`(MIG ref)이 **VCO를 고정** → `clk_out3`는 정수 분주만(200/171.4/166.7/150…)의 **이산 집합**.
-- **188을 요청해도 200으로 스냅** → 나중 silent fail의 빌미.
-- **버린 가설(정직한 기록)**: "오버클럭해도 latency 안 줄어든다 = feed-bound" 라고 한때 결론냈으나, 그 "200MHz 빌드"가 **실은 silently fail한 빌드**(188→200 스냅 + reset 위반으로 핸드셰이크 깨짐)였을 가능성. → **깨진 빌드끼리 비교**라 확정 불가 → 결론 폐기, 확실한 사실(150MHz 동작)만 남김.
-- **교훈**: 측정 전에 그 빌드가 **timing-clean(positive WNS @ slow corner)** 인지 먼저 봐라.
+**(a) 왜 오버클럭인가 — 무엇을 *안* 건드리는가**
+- baseline(여기까지 = 2장 AXI+DMA build, **100 MHz, 0.188 s, 10000/10000**)에서 가속기는 **compute-bound**: conv2 throughput floor ≈ **1798 cyc/img**.
+- **아이디어**: cycle 거동을 그대로 둔 채 **가속기 datapath 클럭만** 올리면, 100 MHz timer가 세는 wall-clock cycle 수가 그대로 줄어든다 → **firmware 완전 무변경**(timer/PS 코드 손 안 댐).
+- 처음 목표는 **300 MHz(3×)**, 현실적으로 **200 MHz**에서 닫혔다. 이 장은 그 사이 모든 결정의 기록.
 
-**(c) 100→150 — Conv2 broadcast fanout**
-- 300MHz 1차 합성 WNS **−2.99**, 전부 `clk_out3→clk_out3`(datapath intra-clock). 워스트 path **route 86% / logic 14%** → **로직 깊이 아님, 배선 거리 문제**.
-- 원인: 제어/weight broadcast(`state`/`sel`/`pe_en`/`packed_w`)가 **192 PE로 fanout**. DSP 226/240=94% → PE가 die 전역 DSP 컬럼에 깔림 → broadcast가 **die-spanning**. DSP 위치 고정이라 floorplan 불가 → **파이프라인 + 복제**가 유일 레버.
-- 레버(누적): `max_fanout=32`(state/kw_cnt) + weight bc +1reg + `PE_BC_DELAY` PE입력 파이프 + weight_loader nested-multiply→accumulator(조합깊이 6→1). → **150MHz 깨끗이 닫음, HW 10000/10000**.
+**(b) 선행 인프라 — dual-clock CDC로 datapath만 분리, 그리고 "CDC 무죄" 확정**
+- 가속기만 빠른 클럭으로 돌리려면 PS/AXI/CSR(100 MHz)와 datapath(빠른 클럭) 사이 **클럭 도메인 횡단(CDC)**이 필요.
+- RTL(`cnn_accelerator.v` + `core/cdc_pulse_sync.v`/`cdc_bit_sync.v`):
+  - `aclk`(100) 포트 추가. `enable`=**2-FF level sync**, `start`/`img_ready`=**toggle pulse 동기화**(빠른 클럭에서 1-cycle pulse가 N cycle로 보여 **"N배 카운트"**되어 같은 이미지를 N번 처리/bank desync 되는 것 방지).
+  - `img_done`/`input_consumed`는 datapath→100 방향 CDC, `bram_output`은 Port A write@datapath / Port B read@100 **dual-clock BRAM**.
+  - **CSR·firmware·엔진·BMG는 무변경**(common-clock 골격 유지) — CDC FF만 가속기 안에 넣음.
+- XDC: write-bus(100→datapath)는 **`set_max_delay -datapath_only`**. (애초 multicycle 였으나 **비정수 클럭비**(예 190:100=1.9:1)에서 multicycle 부적합 → max_delay가 비율 무관·idempotent해 안전.) 반대 방향(datapath→100)은 `set_false_path`.
+- **검증으로 CDC를 일찌감치 무죄 처리**: 듀얼클럭 TB `tb_system_axi_multi_2clk` **10/10**(3배카운트/펄스손실/데드락 없음) + `report_clock_interaction`. → **이후 어떤 타이밍 문제도 CDC가 원인이 아님을 확정** → 디버깅을 **datapath 내부(intra-clock)에만** 집중할 수 있었다.
 
-**(d) 150→200 — reset fanout** (본편)
-- 남은 워스트 = **단일 reset net** `rst_sync → BUFG → (fanout 41323) → DSP/register`, **−1.94, route 85%, die 전역**.
-- 선택: **tie-0 기각**(기능 바꿈, fragile) → **reset 복제 트리 채택**(분배 구조만 변경, 기능 완전 불변).
+**(c) MMCM 함정 — "188 MHz는 존재하지 않는다"** (스토리의 1차 반전)
+- clk_wiz(MMCM)에서 `clk_out1=100` + `clk_out2=200`(MIG IDELAYCTRL ref)이 **VCO 주파수를 고정**한다. 그러면 `clk_out3`는 그 VCO의 **정수 분주**만 가능 → 실제로 낼 수 있는 값은 **{200, 171.4, 166.7, 150, …}의 이산 집합**.
+- **188을 요청해도 clk_wiz가 200으로 스냅**한다. → "190/188로 타협"은 애초에 불가능했고, 닫을 후보는 **낮은 쪽(171.4/166.7/150)** 또는 **높은 쪽(200, 닫히면)** 뿐.
+- 교훈: **클럭 목표를 정하기 전에 MMCM가 그 주파수를 *실제로* 생성할 수 있는지** `report_clocks`로 먼저 확인. (이 스냅이 뒤(e)의 silent-fail 빌미가 된다.)
+
+**(d) 100 → 150 — Conv2 broadcast fanout을 닫다**
+- 300 MHz 1차 합성: **WNS −2.99, Failing 110302/176215, 전부 `clk_out3→clk_out3`**(datapath intra-clock). CDC·제약은 멀쩡(b).
+- **진단의 핵심 — 로직 깊이가 아니라 route**: 워스트 path가 **route 86% / logic 14%**, Logic Levels 3, DSP None. 즉 **연산이 느린 게 아니라 배선 거리가 문제**.
+- 원인: 제어/weight broadcast(`state`/`sel`/`pe_en`/`pe_id`/`packed_w`)가 **192개 PE로 fanout**. DSP **226/240 = 94%** 사용 → PE가 die 전역 DSP 컬럼에 깔림 → broadcast가 본질적으로 **die-spanning**. DSP 위치는 고정이라 floorplan 불가 → **복제 + 파이프라인이 유일 레버**.
+- 레버(누적):
+  1. **`max_fanout=32`** (conv2_fsm `state`/`kw_cnt`, weight_loader `pe_id`/`slot_id`/`pe_load_en`) + `phys_opt -directive AggressiveFanoutOpt`. → −2.99 → **−2.454**(~173 MHz). 복제만으론 부족.
+  2. **weight broadcast +1 register**(Step1b) — weight-load는 1회성이라 compute 무영향(cycle-neutral).
+  3. **`PE_BC_DELAY` PE 입력 파이프**(Step2) — PE 입력단에 +N register 복제 → broadcast가 PE 클러스터 근처 replica에서 출발. → **−2.187**.
+  4. **weight_loader nested-multiply → accumulator** — 주소/pe_id의 `(((oc·8)+ic)·3+kh)·3+kw` 6-level CARRY4를 단조증가 accumulator로 → **조합깊이 6 → 1**.
+- 검증: iverilog `tb_cnn_accelerator_multi` **40/40 bit-exact** (`PE_BC_DELAY` N=0→1798, 1→1799, 2→1800 cyc/img — 정확히 +N/img).
+- **그런데 300은 안 닫힌다**: broadcast를 닫아도 reset/FSM 잔여(−1.7~−1.94)가 die 전역에 남음 → **낮은 쪽 150 MHz에서 깨끗이 닫고**, HW **10000/10000** 확정(**0.128 s**, `150MHz_result.png`).
+
+**(e) 우회로 — 버린 가설 하나 (정직한 기록, 발표의 훅)**
+- 150 이후 한때 *"오버클럭을 더 해도 latency가 안 준다 = feed-bound(클럭 무관)"*라고 결론냈었다. 근거: "가속기 200 MHz인데 wall-clock이 100 MHz와 동일(18.77M cyc)"이라는 측정.
+- **이 가설을 폐기했다.** 그 "200 MHz 빌드"가 사실 **silently fail한 빌드**였을 가능성이 큼 — **188 설정 → 200으로 스냅(c) → 실제로는 200으로 돌면서 reset 경로(−1.94) 위반 → 분산 FSM/in-flight 카운터 desync → 중간에 멈춤/오작동.** 즉 "같은 wall-clock"은 **깨진 빌드끼리의 비교**라 확정 불가.
+- → 관련 결론/주석/메모를 전부 제거하고 **확실한 사실(150 동작)만** 남김.
+- **교훈 2개**: ① 측정으로 결론 내리기 전에 그 빌드가 **timing-clean(positive WNS @ slow corner)** 인지 먼저 봐라. ② 요청 클럭 ≠ 실제 클럭(188→200 스냅)이면 Vivado가 통과시킨 빌드도 실모드에서 **silent fail**한다. → 이 깨달음이 150→200의 방향("**reset부터 닫자**")을 정했다.
+
+**(f) 150 → 200 — reset fanout을 닫다 (본편)**
+- 남은 최대 WNS = **단일 reset net** `rst_sync_reg → BUFG → (fanout 41323) → DSP/RSTB·register`, **−1.94, route 85%, 1343 violating endpoints, die 전역**. 한 net이 datapath 전 register(~41k)로 직접 fanout → BUFG 글로벌 라우팅으로 die 끝 DSP까지 가는 데 너무 김.
+- **접근 선택**: tie-0(reset 자체 제거) **기각**(기능 거동 바뀜·X-leak 검증 부담·fragile) → **reset 복제 트리 채택**(reset을 *제거*하지 않고 **분배 구조만** 바꿈 → 기능 완전 불변):
   ```verilog
-  (* max_fanout = 32  *) reg rst_l1;   // trunk
-  (* max_fanout = 128 *) reg rst_leaf; // leaf → datapath
+  (* max_fanout = 32  *) reg rst_l1;   // L1 trunk (few copies)
+  (* max_fanout = 128 *) reg rst_leaf; // L2 leaf (datapath로 대량 복제)
   ```
-  - 합성이 `rst_sync(1)→rst_l1(~11)→rst_leaf(~323)→datapath(~41k)` 트리를 자동 생성, 각 leaf 복제본을 **cluster 근처 배치** → 긴 net이 짧은 local net 다수로 쪼개짐(BUFG 불필요).
-  - async-assert/sync-deassert 유지 → leaf끼리 상대 스큐 0, 기능 투명.
-- **양파 까기**: reset 닫으니 다음 워스트 노출 → conv2 `shift_en` max_fanout(line buffer CE) → 마지막 한 끗 **`phys_opt_design -directive AggressiveExplore`**로 −0.098 → **+0.011 (0 failing) MET**.
+  - 합성이 `rst_sync(1) → rst_l1(~11) → rst_leaf(~323) → datapath(~41k)` 트리를 **자동 생성**하고 leaf 복제본을 **자기 cluster 근처 배치** → 긴 high-fanout net이 **짧은 local net 다수로 쪼개짐**(BUFG 불필요).
+  - **async-assert(`negedge resetn`)/sync-deassert** 유지 → 모든 단이 스큐 0로 reset, deassert만 +2clk 균일(idle-start라 무해, leaf끼리 상대 스큐 0). 하류 `if(rst)`는 전부 그대로 → **기능 투명**.
+- **양파 까기(onion-peeling) — 워스트 하나 닫으면 다음이 노출**:
 
-**(e) FC argmax — "합성기가 10단 직렬 비교기로 풀어버린다"** (당신 브레인덤프 포인트)
-- FC 끝단 10-class argmax를 **1-cycle combinational 10-way 비교**로 짜면, 24-bit 비교기 **9단이 직렬**로 합성 → 100MHz에서도 setup 위반(−8.6ns), 200MHz는 불가능.
-- **해결: 4-round 파이프라인 토너먼트** `10→5→3→2→1`, round마다 register. 각 stage critical path = "24-bit 비교 **1개** + 2:1 mux" 만 남김.
-- tie-break: left가 항상 더 낮은 인덱스가 되도록 페어링 + strict `>` → "낮은 인덱스 우선", **기존 combinational과 bit-exact 동일**(`RTL/fc/fc_argmax.v`).
+  | 단계 | WNS | Failing | 조치 |
+  |---|---|---|---|
+  | reset 트리만 | **−0.154** | 44 | (−1.94 **완전 소멸** 확인) |
+  | + phys_opt (default) | **−0.102** | 31 | default가 plateau("did not improve") |
+  | + conv2 `shift_en` max_fanout | **−0.098** | 1 | line buffer CE 클러스터 닫힘 |
+  | + **phys_opt `-directive AggressiveExplore`** | **+0.011** | **0** | **MET ✅** |
 
-**(f) 결과 & 왜 정확히 2×가 아닌가**
-- 150MHz **0.128s** / 200MHz **108.9 ms**(10,896,290 cyc, WNS +0.011 = 정식 signoff) / + Vitis feed-overlap **98 ms**.
-- baseline(100MHz @ AXI-DMA) 0.188s 대비 **1.72×**. **2×가 아닌 이유**: profile에서 in-CDMA(blocking) **72%**가 100MHz feed 도메인(클럭 무관) → 가속기 2×는 compute slice만 압축. **현재 floor = CDMA feed** → 다음 레버는 feed overlap, 그 다음이 Winograd.
+  - `shift_en`은 conv2_fsm의 **조합 출력**이 8 ic line_buffer/window CE로 die 전역 broadcast되는데(`line_buffer.mem`이 FF 합성 → CE=`shift_en&(ptr==addr)`), `state`/`kw_cnt`엔 있던 `max_fanout`이 **`shift_en`만 빠져 있었다** → `(* max_fanout=16 *)` 한 줄로 31→1.
+- **검증**: iverilog `tb_cnn_accelerator_multi` 40/40 + `tb_system_axi_multi` 10/10 bit-exact. (★ `dsp48e1_model.v`에 `initial`이 없어 reset 변경의 X를 **실제 전파**해서 잡는다 → bit-exact PASS = X-leak 없음 = HW(GSR=0)는 더 안전.)
+- **★ +0.011 = positive WNS @ slow(signoff) corner = 정식 MET** ((e)의 −1.94 silent fail과 근본적으로 다름).
 
-### ③ 핵심 수치/그림
-- WNS 진행 표(−2.99 → −2.454 → −1.94 → … → +0.011). route% vs logic% 막대. fanout 41323 → 복제 트리 그림. argmax 9단 직렬 → 4-round 토너먼트 그림. 타이밍 리포트 캡처(`docs/timing/`, `150MHz_result.png`, `200MHz_result_vitis_optimize.png`).
+**(g) FC argmax — "합성기가 10단 직렬 비교기로 풀어버린다"** (브레인덤프 포인트, datapath 내 또 다른 fanout-무관 병목)
+- FC 끝단 10-class argmax를 **1-cycle combinational 10-way 비교**로 짜면 24-bit 비교기 **9단이 직렬**로 풀려 **100 MHz에서도 setup −8.6 ns** → 200은 논외.
+- **해결: 4-round 파이프라인 토너먼트** `10→5→3→2→1`, round마다 register. stage critical path = "**24-bit 비교 1개 + 2:1 mux**"만 남김.
+- tie-break: 페어링을 left가 항상 더 낮은 인덱스가 되게 + strict `>` → **"낮은 인덱스 우선", 기존 combinational과 bit-exact 동일**(`RTL/fc/fc_argmax.v`). latency = in_valid 후 4 cycle.
 
-### ④ 슬라이드 (가볍게)
-- 슬라이드 1: "클럭만 올리면 firmware 무변경으로 빨라진다" + 187→98 화살표.
-- 슬라이드 2: **핵심 한 장** — "이 칩의 벽 = route delay(배선 거리), 해법 = `max_fanout` 복제" + route 86% 막대 + 복제 트리 그림.
-- 슬라이드 3: WNS 진행 표(애니메이션으로 한 줄씩) → +0.011 MET.
-- 슬라이드 4: argmax 9단→4-round 그림(작은 임팩트 카드).
-- MMCM/silent-fail 서사는 **말로** (시간 되면 한 슬라이드, "188은 존재하지 않았다" 훅).
+**(h) 결과 & 왜 정확히 2×가 아닌가** (정직한 분석으로 마무리)
+- **150 MHz: 0.128 s**(12,795,913 cyc, in-CDMA 67%) → **200 MHz: 108.9 ms**(10,896,290 cyc, WNS +0.011) → **+ Vitis feed-overlap: 98 ms**(9,799,994 cyc, in-CDMA 56%).
+- baseline(100 MHz AXI-DMA) 0.188 s 대비 **1.72×**, 150 대비 1.17×.
+- **왜 2×가 아닌가**: profile상 **in-CDMA(blocking) 72%**(7.9M cyc)가 **100 MHz feed 도메인**(가속기 클럭 무관). 가속기 2×는 **compute slice만** 압축 → 전체는 1.72×. **현재 floor = CDMA feed.**
+- → **다음 레버**: ① feed overlap(non-blocking/prefetch CDMA + 입력 bank>2) — Vitis 단에서 이미 98 ms로 일부 회수, ② **Complex Winograd**(4장, compute 자체를 줄여 feed를 푼 뒤 효과).
 
-### ⑤ 예상 질문
-- "왜 300이 아니라 200?" → MMCM 이산값 + reset/broadcast 잔여가 300에서 die 전역, 200에서 clean.
-- "max_fanout 복제가 기능을 바꾸나?" → 아니다, iverilog 40/40 bit-exact + reset은 async-assert/sync-deassert로 투명.
-- "왜 2배 안 빨라지나?" → CDMA feed 72%가 100MHz 도메인.
-- "phys_opt가 재현되나?" → interactive 결과라 strategy에 AggressiveExplore 넣어야 재현(함정 언급하면 가산점).
+### ③ 핵심 수치/그림 (자료는 이미 repo에 있음)
+- **WNS 진행 표**: −2.99 → −2.454 → −2.187 → (reset)−0.154 → −0.102 → −0.098 → **+0.011**.
+- **route% vs logic% 막대**(86% vs 14%) — "배선이 문제" 한 장.
+- **fanout 41323 → 복제 트리**(rst_sync→l1→leaf→41k) 그림.
+- reset/shift_en **`max_fanout` 한 줄** 코드 스니펫.
+- argmax **9단 직렬 → 4-round 토너먼트** 그림.
+- 실측 캡처: `150MHz_result.png`(128 ms), `200MHz_result_vitis_optimize.png`(98 ms), `docs/timing/*`.
+
+### ④ 슬라이드 (가볍게 — 5장 + 백업)
+- **S1**: "클럭만 올리면 firmware 무변경으로 빨라진다" + `187 → 108.9 → 98 ms` 화살표.
+- **S2 (이 장의 한 장)**: **"이 칩의 벽 = route delay(배선 거리), 해법 = `max_fanout` 복제"** + route 86% 막대 + reset 복제 트리 그림.
+- **S3**: WNS 진행 표(한 줄씩 애니메이션) → **+0.011 MET**.
+- **S4**: argmax 9단 직렬 → 4-round 토너먼트(작은 임팩트 카드).
+- **S5**: 실측 사진 2장 + "왜 1.72×인가 = CDMA feed 72%".
+- **말로만**: (b) CDC 무죄, (c)(e) MMCM 스냅 + silent-fail 훅("188은 존재하지 않았다"). 시간 빡세면 S4 생략하고 g는 한 문장.
+
+### ⑤ 예상 질문 (Q&A 대비)
+- **"왜 300이 아니라 200?"** → MMCM 이산값(200 다음이 171/167/150) + reset/broadcast 잔여가 300에선 die 전역(−1.7~−1.94), 200에서 clean.
+- **"max_fanout 복제가 기능을 바꾸나?"** → 아니다. attribute-only, iverilog 40/40 bit-exact. reset은 async-assert/sync-deassert로 스큐 0 투명. (DSP 모델에 initial 없어 X-leak까지 잡았다.)
+- **"왜 2배 안 빨라지나?"** → in-CDMA(blocking) 72%가 100 MHz feed 도메인(클럭 무관) → 가속기 2×는 compute만 압축.
+- **"phys_opt가 재현되나?"** → interactive 결과라 그 in-memory design에서 바로 write_bitstream하거나, impl strategy에 AggressiveExplore post-route phys_opt를 넣어야 함(안 넣고 impl 재실행 시 −0.098 복귀). ← 함정 언급하면 가산점.
+- **"왜 dual-clock인가, 전체를 300으로 올리면?"** → MicroBlaze/AXI/MIG는 암호화 고정 IP라 −1 등급에서 200도 못 닫음(UG984 best 267, 같은 보드 tutorial 200 fail) → 가속기 datapath만 분리.
 
 ---
 

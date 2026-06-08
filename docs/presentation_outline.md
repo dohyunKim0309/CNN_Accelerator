@@ -163,7 +163,8 @@
   - `aclk`(100) 포트 추가. `enable`=**2-FF level sync**, `start`/`img_ready`=**toggle pulse 동기화**(빠른 클럭에서 1-cycle pulse가 N cycle로 보여 **"N배 카운트"**되어 같은 이미지를 N번 처리/bank desync 되는 것 방지).
   - `img_done`/`input_consumed`는 datapath→100 방향 CDC, `bram_output`은 Port A write@datapath / Port B read@100 **dual-clock BRAM**.
   - **CSR·firmware·엔진·BMG는 무변경**(common-clock 골격 유지) — CDC FF만 가속기 안에 넣음.
-- XDC: write-bus(100→datapath)는 **`set_max_delay -datapath_only`**. (애초 multicycle 였으나 **비정수 클럭비**(예 190:100=1.9:1)에서 multicycle 부적합 → max_delay가 비율 무관·idempotent해 안전.) 반대 방향(datapath→100)은 `set_false_path`.
+- **XDC 제약 — 왜 필요한가 (발표 20초 포인트)**: 도메인을 둘로 나누면 100↔datapath **경계 경로**가 생기는데, STA(타이밍 분석기)는 기본적으로 이걸 *목적지 클럭 1주기 안에* 닫으라고 요구 → **실제론 여유 있는 멀쩡한 경로가 가짜 violation**으로 뜬다. → XDC로 "이 경계 경로를 어떻게 분석하라"고 정확히 알려줘야 **timing이 닫힌다**(안 하면 빌드 자체가 FAIL).
+  - write-bus(100→datapath, 실데이터)는 `set_max_delay -datapath_only`(**비정수 클럭비**(190:100=1.9:1)에서도 비율 무관·idempotent해 안전; 애초 multicycle은 부적합), CDC 동기화기 입력(datapath→100)은 `set_false_path`.
 - **검증으로 CDC를 일찌감치 무죄 처리**: 듀얼클럭 TB `tb_system_axi_multi_2clk` **10/10**(3배카운트/펄스손실/데드락 없음) + `report_clock_interaction`. → **이후 어떤 타이밍 문제도 CDC가 원인이 아님을 확정** → 디버깅을 **datapath 내부(intra-clock)에만** 집중할 수 있었다.
 
 **(c) MMCM 함정 — "188 MHz는 존재하지 않는다"** (스토리의 1차 반전)
@@ -244,6 +245,7 @@
 - **"왜 2배 안 빨라지나?"** → in-CDMA(blocking) 72%가 100 MHz feed 도메인(클럭 무관) → 가속기 2×는 compute만 압축.
 - **"phys_opt가 재현되나?"** → interactive 결과라 그 in-memory design에서 바로 write_bitstream하거나, impl strategy에 AggressiveExplore post-route phys_opt를 넣어야 함(안 넣고 impl 재실행 시 −0.098 복귀). ← 함정 언급하면 가산점.
 - **"왜 dual-clock인가, 전체를 300으로 올리면?"** → MicroBlaze/AXI/MIG는 암호화 고정 IP라 −1 등급에서 200도 못 닫음(UG984 best 267, 같은 보드 tutorial 200 fail) → 가속기 datapath만 분리.
+- **"XDC는 왜 손댔나?"** → 도메인 경계 경로를 STA가 기본 분석하면 가짜 violation이 떠서 timing이 안 닫힌다. 경계를 어떻게 볼지 알려줘 닫히게 + 데이터 무결성 보장(write-bus는 max_delay로 여전히 bound, async 선언은 금지).
 
 ---
 

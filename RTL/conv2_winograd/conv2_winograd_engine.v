@@ -83,8 +83,9 @@ module conv2_winograd_engine (
     // Consumer counters (RUN compute issue)
     //==========================================================================
     reg [4:0] compute_cnt;   // 0..31 (=ROM sel, [0]=grp)
-    reg [2:0] tile_cnt;      // tx 0..5
-    reg [2:0] trow_cnt;      // ty 0..5
+    // max_fanout: tile_cnt/trow_cnt 가 row buffer 36-way read mux(2304b) select 구동 → 복제
+    (* max_fanout = 40 *) reg [2:0] tile_cnt;      // tx 0..5
+    (* max_fanout = 40 *) reg [2:0] trow_cnt;      // ty 0..5
     reg       compute_active;
     wire last_issue = compute_active && (trow_cnt==3'd5) && (tile_cnt==3'd5) && (compute_cnt==5'd31);
     wire grp = compute_cnt[0];
@@ -156,7 +157,22 @@ module conv2_winograd_engine (
     );
 
     //==========================================================================
-    // 8 input transforms + grp mux → a_flat (4 lane × 46)
+    // ★ class B fix (재정렬 0): register 를 transform 앞(tile6_q)으로 이동.
+    //   기존 [rb_read→transform→grp-mux→a_flat_q] 한 cycle → 분할:
+    //     stage1 [rb_read → tile6_q],  stage2 [tile6_q → transform → grp-mux → DSP BREG].
+    //   DSP 입력 register(BREG, CEB2=en)가 2번째 단 → issue→M latency·tag·collector 불변
+    //   (옛 a_flat_q 와 동일 +1). tile_cnt fanout(rb_read) 를 transform 과 분리.
+    //   tile6 는 tile 당 32-cyc 상수라 register 무해.  grp_q=grp(stage2 grp-mux 정렬).
+    //==========================================================================
+    reg [6*6*64-1:0] tile6_q;
+    // grp_q2 = grp-mux select → 4 lane × 46 op × VW = 2576 mux fanout (최대 broadcast).
+    //   max_fanout 으로 복제 → lane cluster 근처에서 select (baseline broadcast 동류).
+    reg              grp_q;
+    (* max_fanout = 32 *) reg grp_q2;   // 입력변환 +1 만큼 grp-mux 정렬
+    always @(posedge clk) begin tile6_q <= tile6; grp_q <= grp; grp_q2 <= grp_q; end
+
+    //==========================================================================
+    // 8 input transforms + grp mux → a_flat (4 lane × 46)  [tile6_q → comb → DSP BREG]
     //==========================================================================
     wire [46*VW-1:0] a_ic [0:7];
     genvar ic, pp;
@@ -164,15 +180,15 @@ module conv2_winograd_engine (
         for (ic=0; ic<8; ic=ic+1) begin : gic
             wire [36*8-1:0] d_flat_ic;
             for (pp=0; pp<36; pp=pp+1) begin : gp
-                assign d_flat_ic[pp*8 +: 8] = tile6[pp*64 + ic*8 +: 8];
+                assign d_flat_ic[pp*8 +: 8] = tile6_q[pp*64 + ic*8 +: 8];
             end
-            wino_input_transform #(.DW(8), .VW(VW)) u_it (.d_flat(d_flat_ic), .a_flat(a_ic[ic]));
+            wino_input_transform #(.DW(8), .VW(VW)) u_it (.clk(clk), .d_flat(d_flat_ic), .a_flat(a_ic[ic]));
         end
     endgenerate
     wire [4*46*VW-1:0] a_flat;
     generate
         for (pp=0; pp<4; pp=pp+1) begin : glane
-            assign a_flat[pp*46*VW +: 46*VW] = grp ? a_ic[4+pp] : a_ic[pp];
+            assign a_flat[pp*46*VW +: 46*VW] = grp_q2 ? a_ic[4+pp] : a_ic[pp];
         end
     endgenerate
 
@@ -217,7 +233,8 @@ module conv2_winograd_engine (
         (state==RUN && compute_active && !last_issue) ?
             ((compute_cnt==5'd31) ? 5'd0 : compute_cnt + 5'd1) :
         compute_cnt;
-    (* keep = "true" *) reg [4:0] compute_cnt_l [0:3];
+    // max_fanout: lane copy 1개가 552 RAMD32(46op×12bit) 주소 구동 → ~9 복제로 fanout↓
+    (* keep = "true", max_fanout = 64 *) reg [4:0] compute_cnt_l [0:3];
     integer lc;
     always @(posedge clk) begin
         if (rst) for (lc=0; lc<4; lc=lc+1) compute_cnt_l[lc] <= 5'd0;
@@ -240,38 +257,39 @@ module conv2_winograd_engine (
     generate for (gop = 0; gop < 4*46; gop = gop+1) begin : g_wpe
         (* ram_style = "distributed" *)
         reg [UW-1:0] wmem_op [0:31];
-        reg [UW-1:0] w_q_op;
+        reg [UW-1:0] w_q_op, w_q_op2;
         always @(posedge clk) begin
             if (wm_we && (wm_op == gop[7:0])) wmem_op[wm_addr] <= wm_data;     // local write
-            w_q_op <= wmem_op[compute_cnt_l[gop/46]];                         // local read (L=1, lane copy)
+            w_q_op  <= wmem_op[compute_cnt_l[gop/46]];                        // local read (L=1, lane copy)
+            w_q_op2 <= w_q_op;                                                // weight +1 (입력변환 파이프 정렬)
         end
-        assign w_q[gop*UW +: UW] = w_q_op;
+        assign w_q[gop*UW +: UW] = w_q_op2;
     end endgenerate
 
-    reg [2:0] mdrain_cnt;
-    wire mul_en  = compute_active || (state==DRAIN && mdrain_cnt < 3'd6);  // +1 (issue register stage)
+    reg [3:0] mdrain_cnt;
+    wire mul_en  = compute_active || (state==DRAIN && mdrain_cnt < 4'd8);  // +3 (issue reg + 입력변환 +1 + reduce +1)
     wire mul_grp = compute_active ? grp : 1'b0;
 
     //==========================================================================
-    // ★ 200MHz #1: DSP 입력 직전 1-cyc register stage.
-    //   최장 조합경로 = rb 36-way comb read → 8× input_transform(adder) → grp-mux → DSP B-port.
-    //   activation/en/grp 를 register 로 끊는다. weight 는 wmem L=1 read 가 같은 +1 정렬을
-    //   제공(DSP A-port). ⇒ mul array 내부 타이밍 불변, 전체 issue→M 가 +1 cyc 시프트.
-    //     보정: tag pipeline 4→5, DRAIN mul_en window +1. collector/writer/wdone 는 m_valid
-    //     를 따라가므로 자동 +1 (per-image latency +1 cyc, throughput 불변).
+    // ★ 200MHz #1: DSP 입력 직전 register stage (en/grp 만).  activation 은 위 tile6_q +
+    //   DSP BREG 로 2-stage 분할(class B fix) → a_flat 은 comb 로 mul array 에 직접.
+    //   weight 는 per-PE wmem L=1 read(w_q)가 같은 +1 정렬 제공(DSP A-port).
+    //   ⇒ issue→M 는 +1(=옛 a_flat_q 와 동일), tag pipeline 5 / collector tag[7] 불변.
     //==========================================================================
-    reg [4*46*VW-1:0] a_flat_q;
-    reg               mul_en_q, mul_grp_q;
+    // ★ mul_en_q2 = DSP CE → 184 DSP × {CEA2,CEB2,CEM,CEP} = 736 fanout (baseline pe_en/shift_en 동류).
+    //   max_fanout 으로 driver 복제 → DSP cluster 근처에서 출발 (floorplan 불가한 DSP 고정열 대응).
+    reg               mul_en_q, mul_grp_q, mul_grp_q2;
+    (* max_fanout = 32 *) reg mul_en_q2;
     always @(posedge clk) begin
-        if (rst) begin a_flat_q<={4*46*VW{1'b0}}; mul_en_q<=1'b0; mul_grp_q<=1'b0; end
-        else     begin a_flat_q<=a_flat; mul_en_q<=mul_en; mul_grp_q<=mul_grp; end
+        if (rst) begin mul_en_q<=1'b0; mul_grp_q<=1'b0; mul_en_q2<=1'b0; mul_grp_q2<=1'b0; end
+        else     begin mul_en_q<=mul_en; mul_grp_q<=mul_grp; mul_en_q2<=mul_en_q; mul_grp_q2<=mul_grp_q; end
     end
 
     wire [36*MW-1:0] m_re_flat, m_im_flat;
     wire             m_valid;
     wino_mul_array #(.UW(UW), .VW(VW), .PW(PW), .MW(MW)) u_mul (
-        .clk(clk), .rst(rst), .en(mul_en_q), .grp_in(mul_grp_q),
-        .w_flat(w_q), .a_flat(a_flat_q),
+        .clk(clk), .rst(rst), .en(mul_en_q2), .grp_in(mul_grp_q2),
+        .w_flat(w_q), .a_flat(a_flat),
         .m_re_flat(m_re_flat), .m_im_flat(m_im_flat), .m_valid(m_valid)
     );
 
@@ -280,15 +298,16 @@ module conv2_winograd_engine (
     //   m_valid = (등록된 grp1 issue)+4 = (compute context)+1+4 = +5. 따라서 tag delay 4→5.
     //==========================================================================
     wire [3:0] issue_oc   = compute_cnt[4:1];
-    reg  [3:0] tg_oc   [1:5];
-    reg  [2:0] tg_trow [1:5];
-    reg  [2:0] tg_tcol [1:5];
+    // tag depth 5→7: 출력변환 파이프라인(+2) 만큼 연장 → collector 가 tg_*[7] 사용
+    reg  [3:0] tg_oc   [1:9];
+    reg  [2:0] tg_trow [1:9];
+    reg  [2:0] tg_tcol [1:9];
     integer ti;
     always @(posedge clk) begin
-        if (rst) for (ti=1; ti<=5; ti=ti+1) begin tg_oc[ti]<=0; tg_trow[ti]<=0; tg_tcol[ti]<=0; end
+        if (rst) for (ti=1; ti<=9; ti=ti+1) begin tg_oc[ti]<=0; tg_trow[ti]<=0; tg_tcol[ti]<=0; end
         else begin
             tg_oc[1]<=issue_oc; tg_trow[1]<=trow_cnt; tg_tcol[1]<=tile_cnt;
-            for (ti=2; ti<=5; ti=ti+1) begin
+            for (ti=2; ti<=9; ti=ti+1) begin
                 tg_oc[ti]<=tg_oc[ti-1]; tg_trow[ti]<=tg_trow[ti-1]; tg_tcol[ti]<=tg_tcol[ti-1];
             end
         end
@@ -298,15 +317,20 @@ module conv2_winograd_engine (
     // output transform + truncate (per-OC, 16 pixel)
     //==========================================================================
     wire [16*YW-1:0] y16_flat;
-    wino_output_transform #(.MW(MW), .YW(YW)) u_ot (.mre_flat(m_re_flat), .mim_flat(m_im_flat), .y16_flat(y16_flat));
+    wire             ot_valid;   // 출력변환 파이프라인(+2) 후 Y16 유효 (= m_valid+2)
+    wino_output_transform #(.MW(MW), .YW(YW)) u_ot (
+        .clk(clk), .in_valid(m_valid), .mre_flat(m_re_flat), .mim_flat(m_im_flat),
+        .out_valid(ot_valid), .y16_flat(y16_flat)
+    );
     wire [16*8-1:0] trunc_out;
     wino_truncate #(.N(16), .YW(YW), .SHIFT(14)) u_tr (
-        .clk(clk), .rst(rst), .en(m_valid), .y16_flat(y16_flat), .out_flat(trunc_out)
+        .clk(clk), .rst(rst), .en(ot_valid), .y16_flat(y16_flat), .out_flat(trunc_out)
     );
 
     //==========================================================================
-    // collector → tile_out[bank=tcol[0]][pixel][oc]  (trunc_out 는 m_valid+1)
-    //   cwe = m_valid 1-cyc 지연 → 이 cycle 에 trunc_out/coc 유효, posedge 에서 tile_out 기록.
+    // collector → tile_out[bank=tcol[0]][pixel][oc]  (trunc_out 는 ot_valid+1 = m_valid+3)
+    //   cwe = ot_valid 1-cyc 지연 → 이 cycle 에 trunc_out/coc 유효, posedge 에서 tile_out 기록.
+    //   출력변환 +2 → coc/tag 는 tg_*[7] (= 옛 [5] + 2) 로 정렬.
     //==========================================================================
     reg [7:0] tile_out [0:1][0:15][0:15];
     reg       cwe;
@@ -318,7 +342,7 @@ module conv2_winograd_engine (
     always @(posedge clk) begin
         if (rst) begin cwe<=0; coc<=0; coc_trow<=0; coc_tcol<=0; tile_done<=0; done_trow<=0; done_tcol<=0; end
         else begin
-            cwe<=m_valid; coc<=tg_oc[5]; coc_trow<=tg_trow[5]; coc_tcol<=tg_tcol[5];
+            cwe<=ot_valid; coc<=tg_oc[9]; coc_trow<=tg_trow[9]; coc_tcol<=tg_tcol[9];
             tile_done<=1'b0;
             if (cwe) begin
                 for (pidx=0; pidx<16; pidx=pidx+1)
@@ -393,7 +417,7 @@ module conv2_winograd_engine (
                         end else compute_cnt<=compute_cnt+5'd1;
                      end
                 DRAIN: begin
-                        mdrain_cnt<=mdrain_cnt+3'd1;
+                        mdrain_cnt<=mdrain_cnt+4'd1;
                         if (wdone_r) state<=WAIT_IMG;
                      end
                 default: state<=IDLE;

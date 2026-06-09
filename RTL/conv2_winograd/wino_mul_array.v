@@ -92,14 +92,18 @@ module wino_mul_array #(
     //==========================================================================
     reg signed [MW-1:0] acc_re [0:25];
     reg signed [MW-1:0] acc_im [0:25];
+    // ★ C-1: cross-lane 합을 register(gp_reg) → reduce chain(prod→lane_reduce→cross-lane→
+    //   msum→m_assemble ~14단)을 분할 (+1 latency).  msum/acc 는 gp_reg 사용.
+    reg signed [MW-1:0] gpre_q [0:25];
+    reg signed [MW-1:0] gpim_q [0:25];
 
-    // msum = acc + gp  (grp1 cycle 에 8-IC 합 = 완성 M)
+    // msum = acc + gp_reg  (grp1 cycle 에 8-IC 합 = 완성 M)
     wire [26*MW-1:0] msum_re_flat;
     wire [26*MW-1:0] msum_im_flat;
     generate
         for (k = 0; k < 26; k = k + 1) begin : msum
-            assign msum_re_flat[k*MW +: MW] = acc_re[k] + gpre[k];
-            assign msum_im_flat[k*MW +: MW] = acc_im[k] + gpim[k];
+            assign msum_re_flat[k*MW +: MW] = acc_re[k] + gpre_q[k];
+            assign msum_im_flat[k*MW +: MW] = acc_im[k] + gpim_q[k];
         end
     endgenerate
 
@@ -112,32 +116,38 @@ module wino_mul_array #(
         .mim_flat (asm_im_flat)
     );
 
-    // grp/valid 를 DSP latency(3) 만큼 지연 → stage3 정렬
-    reg [2:0] grp_pipe;
-    reg [2:0] vld_pipe;
+    // grp/valid 를 (DSP 3 + cross-lane reg 1 = 4) 만큼 지연 → stage4 정렬 (C-1)
+    reg [3:0] grp_pipe;
+    reg [3:0] vld_pipe;
 
     integer kk;
     always @(posedge clk) begin
         if (rst) begin
-            grp_pipe  <= 3'b0;
-            vld_pipe  <= 3'b0;
+            grp_pipe  <= 4'b0;
+            vld_pipe  <= 4'b0;
             m_valid   <= 1'b0;
             m_re_flat <= {36*MW{1'b0}};
             m_im_flat <= {36*MW{1'b0}};
             for (kk = 0; kk < 26; kk = kk + 1) begin
                 acc_re[kk] <= {MW{1'b0}};
                 acc_im[kk] <= {MW{1'b0}};
+                gpre_q[kk] <= {MW{1'b0}};
+                gpim_q[kk] <= {MW{1'b0}};
             end
         end else if (en) begin
-            grp_pipe <= {grp_pipe[1:0], grp_in};
-            vld_pipe <= {vld_pipe[1:0], 1'b1};
+            grp_pipe <= {grp_pipe[2:0], grp_in};
+            vld_pipe <= {vld_pipe[2:0], 1'b1};
+            for (kk = 0; kk < 26; kk = kk + 1) begin   // ★ C-1: cross-lane 합 register
+                gpre_q[kk] <= gpre[kk];
+                gpim_q[kk] <= gpim[kk];
+            end
 
-            if (vld_pipe[2]) begin
-                if (grp_pipe[2] == 1'b0) begin
-                    // grp0 : 첫 4 IC partial 적재
+            if (vld_pipe[3]) begin
+                if (grp_pipe[3] == 1'b0) begin
+                    // grp0 : 첫 4 IC partial 적재 (registered gp)
                     for (kk = 0; kk < 26; kk = kk + 1) begin
-                        acc_re[kk] <= gpre[kk];
-                        acc_im[kk] <= gpim[kk];
+                        acc_re[kk] <= gpre_q[kk];
+                        acc_im[kk] <= gpim_q[kk];
                     end
                     m_valid <= 1'b0;
                 end else begin
@@ -151,8 +161,8 @@ module wino_mul_array #(
             end
         end else begin
             // en=0 (image 경계 등) : 파이프 clear → 다음 burst 가 stale DSP 잔여 마스킹 후 refill
-            grp_pipe <= 3'b0;
-            vld_pipe <= 3'b0;
+            grp_pipe <= 4'b0;
+            vld_pipe <= 4'b0;
             m_valid  <= 1'b0;
         end
     end

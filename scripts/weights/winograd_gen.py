@@ -483,7 +483,11 @@ def _lincomb(terms, width):
 
 
 def emit_input_transform():
-    """d(6×6 int8) → 46 activation operand (V=BᵀdB, 곱셈기 0개)."""
+    """d(6×6 int8) → 46 activation operand (V=BᵀdB, 곱셈기 0개).
+       ★ PIPELINE (clk): stage1 t=Bᵀ·d → reg(t) → stage2 V=t·B + operand assembly.
+         13-level 단일 cycle 조합을 stage당 ~6-7 로 분할 (입력변환 critical path WNS 해소).
+         a_flat = d_flat +1 cycle.  V 는 tile당 32-cyc 상수 → latency 무손실(throughput 불변).
+         bit-exact 불변(register 위치만 추가, 데이터 값 동일)."""
     L = []
     L.append("`timescale 1ns / 1ps")
     L.append("//" + "/" * 78)
@@ -491,11 +495,13 @@ def emit_input_transform():
     L.append("//   복소수 Winograd F(4,3) 입력변환  V = Bᵀ·d·B  (per IC, 곱셈기 0개)")
     L.append("//   d(6×6 INT8) → 46 activation operand (B-port feed), canonical 순서:")
     L.append("//     [16 real pos: V_re] + [10 cmul pos: (V_re+V_im), V_re, V_im]")
-    L.append("//   2-stage: t=Bᵀ·d (계수 {0,±1,±4}) → V=t·B (계수 {0,±1,±4}). add/shift/neg only.")
+    L.append("//   ★ 2-stage PIPELINE: stage1 t=Bᵀ·d → reg → stage2 V=t·B+assembly. a_flat=d_flat+1.")
+    L.append("//   계수 {0,±1,±4} add/shift/neg only.")
     L.append("//" + "/" * 78)
     L.append(f"module wino_input_transform #(parameter DW={DW}, VW={VW}) (")
+    L.append("    input  wire             clk,")
     L.append("    input  wire [36*DW-1:0] d_flat,   // d[k][l] = d_flat[(k*6+l)*DW +: DW] (signed)")
-    L.append("    output wire [46*VW-1:0] a_flat    // operand i = a_flat[i*VW +: VW] (signed)")
+    L.append("    output wire [46*VW-1:0] a_flat    // operand i = a_flat[i*VW +: VW] (signed, +1 cyc)")
     L.append(");")
     # unpack d
     L.append(f"    wire signed [{TW-1}:0] d [0:5][0:5];")
@@ -504,16 +510,26 @@ def emit_input_transform():
     L.append("        assign d[gk][gl] = $signed(d_flat[(gk*6+gl)*DW +: DW]);")
     L.append("    endgenerate")
     L.append("")
-    # stage 1: t_re[p][l], t_im[p][l]
-    L.append(f"    // stage1: t = Bᵀ·d   t[p][l] = Σ_k Bᵀ[p,k]·d[k][l]")
-    L.append(f"    wire signed [{TW-1}:0] tre [0:5][0:5];")
-    L.append(f"    wire signed [{TW-1}:0] tim [0:5][0:5];")
+    # stage 1 (comb): t_re/t_im = Bᵀ·d  →  register
+    L.append(f"    // stage1 (comb): t = Bᵀ·d   t[p][l] = Σ_k Bᵀ[p,k]·d[k][l]")
+    L.append(f"    wire signed [{TW-1}:0] tre_c [0:5][0:5];")
+    L.append(f"    wire signed [{TW-1}:0] tim_c [0:5][0:5];")
     for p in range(6):
         for l in range(6):
             tre = [(int(BT_RE[p, k]), f"d[{k}][{l}]") for k in range(6)]
             tim = [(int(BT_IM[p, k]), f"d[{k}][{l}]") for k in range(6)]
-            L.append(f"    assign tre[{p}][{l}] = {_lincomb(tre, TW)};")
-            L.append(f"    assign tim[{p}][{l}] = {_lincomb(tim, TW)};")
+            L.append(f"    assign tre_c[{p}][{l}] = {_lincomb(tre, TW)};")
+            L.append(f"    assign tim_c[{p}][{l}] = {_lincomb(tim, TW)};")
+    L.append("")
+    # stage1→2 pipeline register (t) — 13-level 단일 cycle 분할
+    L.append("    // stage1→2 register (t)")
+    L.append(f"    reg signed [{TW-1}:0] tre [0:5][0:5];")
+    L.append(f"    reg signed [{TW-1}:0] tim [0:5][0:5];")
+    L.append("    integer rp, rl;")
+    L.append("    always @(posedge clk) for (rp=0; rp<6; rp=rp+1) for (rl=0; rl<6; rl=rl+1) begin")
+    L.append("        tre[rp][rl] <= tre_c[rp][rl];")
+    L.append("        tim[rp][rl] <= tim_c[rp][rl];")
+    L.append("    end")
     L.append("")
     # stage 2: V at needed positions (26 V_re + 10 V_im)
     L.append(f"    // stage2: V = t·B   V[p][q] = Σ_l t[p][l]·Bᵀ[q,l]   (B[l][q]=Bᵀ[q,l])")
@@ -553,20 +569,28 @@ def emit_input_transform():
 
 
 def emit_output_transform():
-    """6×6 complex M → 4×4 real Y16 (Y16=Aᵀ·M·A, 곱셈기 0개, 계수 {0,±1})."""
+    """6×6 complex M → 4×4 real Y16 (Y16=Aᵀ·M·A, 곱셈기 0개, 계수 {0,±1}).
+       ★ 2-stage PIPELINE (clk, in_valid→out_valid +2): stage1=Aᵀ·M→reg(y),
+         stage2=y·A→reg(Y16).  20-level 단일 cycle 조합을 stage당 ~8-level 로 분할
+         (Vivado route WNS −10ns critical path = M_reg→AᵀMA→truncate 해소).
+         bit-exact 불변(데이터 값 동일, register 위치만 추가)."""
     L = []
     L.append("`timescale 1ns / 1ps")
     L.append("//" + "/" * 78)
     L.append("// wino_output_transform.v  (자동생성: scripts/weights/winograd_gen.py)")
     L.append("//   복소수 Winograd F(4,3) 출력변환  Y16 = Aᵀ·M·A  (per OC,tile, 곱셈기 0개)")
     L.append("//   M(6×6 complex, 켤레 포함 전체) → Y16(4×4 real). imag 은 수학적으로 0.")
-    L.append("//   2-stage: y=Aᵀ·M (계수 {0,±1}) → Y16=y·A (계수 {0,±1}). add/sub/neg only.")
+    L.append("//   ★ 2-stage PIPELINE: in_valid@T → stage1 y=Aᵀ·M(reg) → stage2 Y16=y·A(reg)")
+    L.append("//      → y16_flat/out_valid@T+2.  계수 {0,±1} add/sub/neg only.")
     L.append("//   out = sat(Y16>>>14)+ReLU 은 wino_truncate 에서 (= direct conv bit-exact).")
     L.append("//" + "/" * 78)
     L.append(f"module wino_output_transform #(parameter MW={MW}, YW={YW}) (")
+    L.append("    input  wire             clk,")
+    L.append("    input  wire             in_valid,  // M 유효 pulse")
     L.append("    input  wire [36*MW-1:0] mre_flat,  // M_re[p][q] = [(p*6+q)*MW +: MW] (signed)")
     L.append("    input  wire [36*MW-1:0] mim_flat,  // M_im[p][q]")
-    L.append("    output wire [16*YW-1:0] y16_flat   // Y16[i][j] = [(i*4+j)*YW +: YW] (signed, real)")
+    L.append("    output reg              out_valid, // Y16 유효 pulse (in_valid+2)")
+    L.append("    output reg  [16*YW-1:0] y16_flat   // Y16[i][j] = [(i*4+j)*YW +: YW] (signed, real)")
     L.append(");")
     L.append(f"    wire signed [{MW-1}:0] mre [0:5][0:5];")
     L.append(f"    wire signed [{MW-1}:0] mim [0:5][0:5];")
@@ -576,33 +600,55 @@ def emit_output_transform():
     L.append("        assign mim[gp][gq] = $signed(mim_flat[(gp*6+gq)*MW +: MW]);")
     L.append("    end endgenerate")
     L.append("")
-    # stage 1: y[i][l] = Σ_p Aᵀ[i,p]·M[p][l]  (i 0..3, l 0..5)  complex
-    L.append("    // stage1: y = Aᵀ·M   y[i][l] = Σ_p Aᵀ[i,p]·M[p][l]")
-    L.append(f"    wire signed [{YW-1}:0] yre [0:3][0:5];")
-    L.append(f"    wire signed [{YW-1}:0] yim [0:3][0:5];")
+    # stage 1 (comb): y[i][l] = Σ_p Aᵀ[i,p]·M[p][l]
+    L.append("    // stage1 (comb): y = Aᵀ·M   y[i][l] = Σ_p Aᵀ[i,p]·M[p][l]")
+    L.append(f"    wire signed [{YW-1}:0] yre_c [0:3][0:5];")
+    L.append(f"    wire signed [{YW-1}:0] yim_c [0:3][0:5];")
     for i in range(4):
         for l in range(6):
             yre = []
             yim = []
             for p in range(6):
-                # (AT_RE+jAT_IM)[i,p] * (mre+j mim)[p][l]
                 yre.append((int(AT_RE[i, p]), f"mre[{p}][{l}]"))
                 yre.append((-int(AT_IM[i, p]), f"mim[{p}][{l}]"))
                 yim.append((int(AT_RE[i, p]), f"mim[{p}][{l}]"))
                 yim.append((int(AT_IM[i, p]), f"mre[{p}][{l}]"))
-            L.append(f"    assign yre[{i}][{l}] = {_lincomb(yre, YW)};")
-            L.append(f"    assign yim[{i}][{l}] = {_lincomb(yim, YW)};")
+            L.append(f"    assign yre_c[{i}][{l}] = {_lincomb(yre, YW)};")
+            L.append(f"    assign yim_c[{i}][{l}] = {_lincomb(yim, YW)};")
     L.append("")
-    # stage 2: Y16[i][j] = Σ_l y[i][l]·A[l][j] = Σ_l y[i][l]·Aᵀ[j,l]  (real part only)
-    L.append("    // stage2: Y16 = y·A   Y16[i][j] = Σ_l y[i][l]·Aᵀ[j,l]  (real part, imag=0)")
+    # stage1 → stage2 pipeline register (y) + valid
+    L.append("    // stage1→2 register (y) + valid stage1")
+    L.append(f"    reg signed [{YW-1}:0] yre [0:3][0:5];")
+    L.append(f"    reg signed [{YW-1}:0] yim [0:3][0:5];")
+    L.append("    reg v1;")
+    L.append("    integer ri, rl;")
+    L.append("    always @(posedge clk) begin")
+    L.append("        v1 <= in_valid;")
+    L.append("        for (ri=0; ri<4; ri=ri+1) for (rl=0; rl<6; rl=rl+1) begin")
+    L.append("            yre[ri][rl] <= yre_c[ri][rl];")
+    L.append("            yim[ri][rl] <= yim_c[ri][rl];")
+    L.append("        end")
+    L.append("    end")
+    L.append("")
+    # stage 2 (comb): Y16[i][j] = Σ_l y[i][l]·Aᵀ[j,l]  (real part only)
+    L.append("    // stage2 (comb): Y16 = y·A   Y16[i][j] = Σ_l y[i][l]·Aᵀ[j,l]  (real part, imag=0)")
+    L.append(f"    wire signed [{YW-1}:0] y16_c [0:3][0:3];")
     for i in range(4):
         for j in range(4):
             terms = []
             for l in range(6):
-                # Re( (yre+j yim)·(AT_RE[j,l]+j AT_IM[j,l]) ) = yre*AT_RE - yim*AT_IM
                 terms.append((int(AT_RE[j, l]), f"yre[{i}][{l}]"))
                 terms.append((-int(AT_IM[j, l]), f"yim[{i}][{l}]"))
-            L.append(f"    assign y16_flat[{i*4+j}*YW +: YW] = {_lincomb(terms, YW)};")
+            L.append(f"    assign y16_c[{i}][{j}] = {_lincomb(terms, YW)};")
+    L.append("")
+    # stage2 register (Y16) + out_valid
+    L.append("    // stage2 register (Y16) + out_valid")
+    L.append("    integer oi, oj;")
+    L.append("    always @(posedge clk) begin")
+    L.append("        out_valid <= v1;")
+    L.append("        for (oi=0; oi<4; oi=oi+1) for (oj=0; oj<4; oj=oj+1)")
+    L.append("            y16_flat[(oi*4+oj)*YW +: YW] <= y16_c[oi][oj];")
+    L.append("    end")
     L.append("endmodule")
     return "\n".join(L) + "\n"
 

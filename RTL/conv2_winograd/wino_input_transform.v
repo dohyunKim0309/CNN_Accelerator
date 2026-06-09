@@ -4,11 +4,13 @@
 //   복소수 Winograd F(4,3) 입력변환  V = Bᵀ·d·B  (per IC, 곱셈기 0개)
 //   d(6×6 INT8) → 46 activation operand (B-port feed), canonical 순서:
 //     [16 real pos: V_re] + [10 cmul pos: (V_re+V_im), V_re, V_im]
-//   2-stage: t=Bᵀ·d (계수 {0,±1,±4}) → V=t·B (계수 {0,±1,±4}). add/shift/neg only.
+//   ★ 2-stage PIPELINE: stage1 t=Bᵀ·d → reg → stage2 V=t·B+assembly. a_flat=d_flat+1.
+//   계수 {0,±1,±4} add/shift/neg only.
 ////////////////////////////////////////////////////////////////////////////////
 module wino_input_transform #(parameter DW=8, VW=14) (
+    input  wire             clk,
     input  wire [36*DW-1:0] d_flat,   // d[k][l] = d_flat[(k*6+l)*DW +: DW] (signed)
-    output wire [46*VW-1:0] a_flat    // operand i = a_flat[i*VW +: VW] (signed)
+    output wire [46*VW-1:0] a_flat    // operand i = a_flat[i*VW +: VW] (signed, +1 cyc)
 );
     wire signed [10:0] d [0:5][0:5];
     genvar gk, gl;
@@ -16,81 +18,90 @@ module wino_input_transform #(parameter DW=8, VW=14) (
         assign d[gk][gl] = $signed(d_flat[(gk*6+gl)*DW +: DW]);
     endgenerate
 
-    // stage1: t = Bᵀ·d   t[p][l] = Σ_k Bᵀ[p,k]·d[k][l]
-    wire signed [10:0] tre [0:5][0:5];
-    wire signed [10:0] tim [0:5][0:5];
-    assign tre[0][0] = (d[0][0] <<< 2) - (d[4][0] <<< 2);
-    assign tim[0][0] = 11'sd0;
-    assign tre[0][1] = (d[0][1] <<< 2) - (d[4][1] <<< 2);
-    assign tim[0][1] = 11'sd0;
-    assign tre[0][2] = (d[0][2] <<< 2) - (d[4][2] <<< 2);
-    assign tim[0][2] = 11'sd0;
-    assign tre[0][3] = (d[0][3] <<< 2) - (d[4][3] <<< 2);
-    assign tim[0][3] = 11'sd0;
-    assign tre[0][4] = (d[0][4] <<< 2) - (d[4][4] <<< 2);
-    assign tim[0][4] = 11'sd0;
-    assign tre[0][5] = (d[0][5] <<< 2) - (d[4][5] <<< 2);
-    assign tim[0][5] = 11'sd0;
-    assign tre[1][0] = d[1][0] + d[2][0] + d[3][0] + d[4][0];
-    assign tim[1][0] = 11'sd0;
-    assign tre[1][1] = d[1][1] + d[2][1] + d[3][1] + d[4][1];
-    assign tim[1][1] = 11'sd0;
-    assign tre[1][2] = d[1][2] + d[2][2] + d[3][2] + d[4][2];
-    assign tim[1][2] = 11'sd0;
-    assign tre[1][3] = d[1][3] + d[2][3] + d[3][3] + d[4][3];
-    assign tim[1][3] = 11'sd0;
-    assign tre[1][4] = d[1][4] + d[2][4] + d[3][4] + d[4][4];
-    assign tim[1][4] = 11'sd0;
-    assign tre[1][5] = d[1][5] + d[2][5] + d[3][5] + d[4][5];
-    assign tim[1][5] = 11'sd0;
-    assign tre[2][0] = -d[1][0] + d[2][0] - d[3][0] + d[4][0];
-    assign tim[2][0] = 11'sd0;
-    assign tre[2][1] = -d[1][1] + d[2][1] - d[3][1] + d[4][1];
-    assign tim[2][1] = 11'sd0;
-    assign tre[2][2] = -d[1][2] + d[2][2] - d[3][2] + d[4][2];
-    assign tim[2][2] = 11'sd0;
-    assign tre[2][3] = -d[1][3] + d[2][3] - d[3][3] + d[4][3];
-    assign tim[2][3] = 11'sd0;
-    assign tre[2][4] = -d[1][4] + d[2][4] - d[3][4] + d[4][4];
-    assign tim[2][4] = 11'sd0;
-    assign tre[2][5] = -d[1][5] + d[2][5] - d[3][5] + d[4][5];
-    assign tim[2][5] = 11'sd0;
-    assign tre[3][0] = -d[2][0] + d[4][0];
-    assign tim[3][0] = -d[1][0] + d[3][0];
-    assign tre[3][1] = -d[2][1] + d[4][1];
-    assign tim[3][1] = -d[1][1] + d[3][1];
-    assign tre[3][2] = -d[2][2] + d[4][2];
-    assign tim[3][2] = -d[1][2] + d[3][2];
-    assign tre[3][3] = -d[2][3] + d[4][3];
-    assign tim[3][3] = -d[1][3] + d[3][3];
-    assign tre[3][4] = -d[2][4] + d[4][4];
-    assign tim[3][4] = -d[1][4] + d[3][4];
-    assign tre[3][5] = -d[2][5] + d[4][5];
-    assign tim[3][5] = -d[1][5] + d[3][5];
-    assign tre[4][0] = -d[2][0] + d[4][0];
-    assign tim[4][0] = d[1][0] - d[3][0];
-    assign tre[4][1] = -d[2][1] + d[4][1];
-    assign tim[4][1] = d[1][1] - d[3][1];
-    assign tre[4][2] = -d[2][2] + d[4][2];
-    assign tim[4][2] = d[1][2] - d[3][2];
-    assign tre[4][3] = -d[2][3] + d[4][3];
-    assign tim[4][3] = d[1][3] - d[3][3];
-    assign tre[4][4] = -d[2][4] + d[4][4];
-    assign tim[4][4] = d[1][4] - d[3][4];
-    assign tre[4][5] = -d[2][5] + d[4][5];
-    assign tim[4][5] = d[1][5] - d[3][5];
-    assign tre[5][0] = -(d[1][0] <<< 2) + (d[5][0] <<< 2);
-    assign tim[5][0] = 11'sd0;
-    assign tre[5][1] = -(d[1][1] <<< 2) + (d[5][1] <<< 2);
-    assign tim[5][1] = 11'sd0;
-    assign tre[5][2] = -(d[1][2] <<< 2) + (d[5][2] <<< 2);
-    assign tim[5][2] = 11'sd0;
-    assign tre[5][3] = -(d[1][3] <<< 2) + (d[5][3] <<< 2);
-    assign tim[5][3] = 11'sd0;
-    assign tre[5][4] = -(d[1][4] <<< 2) + (d[5][4] <<< 2);
-    assign tim[5][4] = 11'sd0;
-    assign tre[5][5] = -(d[1][5] <<< 2) + (d[5][5] <<< 2);
-    assign tim[5][5] = 11'sd0;
+    // stage1 (comb): t = Bᵀ·d   t[p][l] = Σ_k Bᵀ[p,k]·d[k][l]
+    wire signed [10:0] tre_c [0:5][0:5];
+    wire signed [10:0] tim_c [0:5][0:5];
+    assign tre_c[0][0] = (d[0][0] <<< 2) - (d[4][0] <<< 2);
+    assign tim_c[0][0] = 11'sd0;
+    assign tre_c[0][1] = (d[0][1] <<< 2) - (d[4][1] <<< 2);
+    assign tim_c[0][1] = 11'sd0;
+    assign tre_c[0][2] = (d[0][2] <<< 2) - (d[4][2] <<< 2);
+    assign tim_c[0][2] = 11'sd0;
+    assign tre_c[0][3] = (d[0][3] <<< 2) - (d[4][3] <<< 2);
+    assign tim_c[0][3] = 11'sd0;
+    assign tre_c[0][4] = (d[0][4] <<< 2) - (d[4][4] <<< 2);
+    assign tim_c[0][4] = 11'sd0;
+    assign tre_c[0][5] = (d[0][5] <<< 2) - (d[4][5] <<< 2);
+    assign tim_c[0][5] = 11'sd0;
+    assign tre_c[1][0] = d[1][0] + d[2][0] + d[3][0] + d[4][0];
+    assign tim_c[1][0] = 11'sd0;
+    assign tre_c[1][1] = d[1][1] + d[2][1] + d[3][1] + d[4][1];
+    assign tim_c[1][1] = 11'sd0;
+    assign tre_c[1][2] = d[1][2] + d[2][2] + d[3][2] + d[4][2];
+    assign tim_c[1][2] = 11'sd0;
+    assign tre_c[1][3] = d[1][3] + d[2][3] + d[3][3] + d[4][3];
+    assign tim_c[1][3] = 11'sd0;
+    assign tre_c[1][4] = d[1][4] + d[2][4] + d[3][4] + d[4][4];
+    assign tim_c[1][4] = 11'sd0;
+    assign tre_c[1][5] = d[1][5] + d[2][5] + d[3][5] + d[4][5];
+    assign tim_c[1][5] = 11'sd0;
+    assign tre_c[2][0] = -d[1][0] + d[2][0] - d[3][0] + d[4][0];
+    assign tim_c[2][0] = 11'sd0;
+    assign tre_c[2][1] = -d[1][1] + d[2][1] - d[3][1] + d[4][1];
+    assign tim_c[2][1] = 11'sd0;
+    assign tre_c[2][2] = -d[1][2] + d[2][2] - d[3][2] + d[4][2];
+    assign tim_c[2][2] = 11'sd0;
+    assign tre_c[2][3] = -d[1][3] + d[2][3] - d[3][3] + d[4][3];
+    assign tim_c[2][3] = 11'sd0;
+    assign tre_c[2][4] = -d[1][4] + d[2][4] - d[3][4] + d[4][4];
+    assign tim_c[2][4] = 11'sd0;
+    assign tre_c[2][5] = -d[1][5] + d[2][5] - d[3][5] + d[4][5];
+    assign tim_c[2][5] = 11'sd0;
+    assign tre_c[3][0] = -d[2][0] + d[4][0];
+    assign tim_c[3][0] = -d[1][0] + d[3][0];
+    assign tre_c[3][1] = -d[2][1] + d[4][1];
+    assign tim_c[3][1] = -d[1][1] + d[3][1];
+    assign tre_c[3][2] = -d[2][2] + d[4][2];
+    assign tim_c[3][2] = -d[1][2] + d[3][2];
+    assign tre_c[3][3] = -d[2][3] + d[4][3];
+    assign tim_c[3][3] = -d[1][3] + d[3][3];
+    assign tre_c[3][4] = -d[2][4] + d[4][4];
+    assign tim_c[3][4] = -d[1][4] + d[3][4];
+    assign tre_c[3][5] = -d[2][5] + d[4][5];
+    assign tim_c[3][5] = -d[1][5] + d[3][5];
+    assign tre_c[4][0] = -d[2][0] + d[4][0];
+    assign tim_c[4][0] = d[1][0] - d[3][0];
+    assign tre_c[4][1] = -d[2][1] + d[4][1];
+    assign tim_c[4][1] = d[1][1] - d[3][1];
+    assign tre_c[4][2] = -d[2][2] + d[4][2];
+    assign tim_c[4][2] = d[1][2] - d[3][2];
+    assign tre_c[4][3] = -d[2][3] + d[4][3];
+    assign tim_c[4][3] = d[1][3] - d[3][3];
+    assign tre_c[4][4] = -d[2][4] + d[4][4];
+    assign tim_c[4][4] = d[1][4] - d[3][4];
+    assign tre_c[4][5] = -d[2][5] + d[4][5];
+    assign tim_c[4][5] = d[1][5] - d[3][5];
+    assign tre_c[5][0] = -(d[1][0] <<< 2) + (d[5][0] <<< 2);
+    assign tim_c[5][0] = 11'sd0;
+    assign tre_c[5][1] = -(d[1][1] <<< 2) + (d[5][1] <<< 2);
+    assign tim_c[5][1] = 11'sd0;
+    assign tre_c[5][2] = -(d[1][2] <<< 2) + (d[5][2] <<< 2);
+    assign tim_c[5][2] = 11'sd0;
+    assign tre_c[5][3] = -(d[1][3] <<< 2) + (d[5][3] <<< 2);
+    assign tim_c[5][3] = 11'sd0;
+    assign tre_c[5][4] = -(d[1][4] <<< 2) + (d[5][4] <<< 2);
+    assign tim_c[5][4] = 11'sd0;
+    assign tre_c[5][5] = -(d[1][5] <<< 2) + (d[5][5] <<< 2);
+    assign tim_c[5][5] = 11'sd0;
+
+    // stage1→2 register (t)
+    reg signed [10:0] tre [0:5][0:5];
+    reg signed [10:0] tim [0:5][0:5];
+    integer rp, rl;
+    always @(posedge clk) for (rp=0; rp<6; rp=rp+1) for (rl=0; rl<6; rl=rl+1) begin
+        tre[rp][rl] <= tre_c[rp][rl];
+        tim[rp][rl] <= tim_c[rp][rl];
+    end
 
     // stage2: V = t·B   V[p][q] = Σ_l t[p][l]·Bᵀ[q,l]   (B[l][q]=Bᵀ[q,l])
     wire signed [13:0] vre_0_0 = (tre[0][0] <<< 2) - (tre[0][4] <<< 2);

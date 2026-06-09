@@ -41,10 +41,11 @@ module wino_weight_loader #(
     input  wire [31:0]      wb_doutb,
 
     // per-PE weight 메모리 write (narrow, operand 1개씩)
-    output reg              wm_we,
-    output reg  [4:0]       wm_addr,          // entry(sel) 0..31
-    output reg  [7:0]       wm_op,            // operand 0..183 (어느 PE RAM)
-    output reg  [UW-1:0]    wm_data           // operand 1개 (narrow)
+    //   max_fanout: 184 RAMD32(per-PE) 로 흩어지는 write net 복제 → startup write 경로 단축
+    (* max_fanout = 24 *) output reg              wm_we,
+    (* max_fanout = 24 *) output reg  [4:0]       wm_addr,          // entry(sel) 0..31
+    (* max_fanout = 24 *) output reg  [7:0]       wm_op,            // operand 0..183 (어느 PE RAM)
+    (* max_fanout = 24 *) output reg  [UW-1:0]    wm_data           // operand 1개 (narrow)
 );
     localparam [1:0] IDLE=2'd0, LOADING=2'd1, DRAIN=2'd2, FINISH=2'd3;
     reg [1:0]  state;

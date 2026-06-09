@@ -2,11 +2,11 @@
 //////////////////////////////////////////////////////////////////////////////////
 // Module Name: cnn_accelerator  (PL core, Team Assignment 2)
 //
-//   ★★ 빌드 변형 (BUILD VARIANT): BASELINE  ───────────────────────────────────
-//       Conv1 = conv1_engine (RTL/conv1/), Conv2 = conv2_engine (RTL/conv2/).
-//       conv2 weight BMG = conv2_weight_bram (32b×1024), c2w_addra = 10-bit.
-//       ※ 검증된 200MHz overclock baseline (commit 45ad492) — 10000/10000, 108.9ms.
-//   ⚠ 최적화 변형은 cnn_accelerator_winograd.v (conv1_2x_engine + conv2_winograd_engine, c2w_addra 13-bit).
+//   ★★ 빌드 변형 (BUILD VARIANT): WINOGRAD (optimized)  ─────────────────────────
+//       Conv1 = conv1_2x_engine (RTL/conv1_2x/), Conv2 = conv2_winograd_engine (RTL/conv2_winograd/).
+//       conv2 weight BMG = wino_weight_bram (32b×8192, pre-transformed U), c2w_addra = 13-bit.
+//       ※ iverilog 40/40 bit-exact. Vivado LUT/WNS 재확인 단계 (memory: conv2-winograd-rtl).
+//   ⚠ 베이스라인 변형은 cnn_accelerator.v (conv1_engine + conv2_engine, c2w_addra 10-bit).
 //     두 파일의 module 이름이 같으므로(cnn_accelerator) Vivado/iverilog 에 동시 추가 금지.
 //     빌드할 변형 하나만 source 로 포함할 것 (conv2 weight BMG depth/주소폭이 다름).
 //   ──────────────────────────────────────────────────────────────────────────
@@ -46,7 +46,9 @@
 //     bram_c2_to_pool   (conv2 write / maxpool read, 128b×2048, L=2)  ★ 200MHz: L=1→L=2 + maxpool_fsm 7-phase
 //     bram_pool_to_fc   (maxpool write / fc read, 128b×512, L=1)   ★ 신규 IP
 //     [engine 내부 인스턴스 — Port A 만 외부 passthrough]
-//     conv1_weight_bram (conv1_engine) / conv2_weight_bram (conv2_engine) / fc_weight_bram (fc_engine)
+//     conv1_weight_bram (conv1_engine) / fc_weight_bram (fc_engine)
+//     wino_weight_bram  (conv2_winograd_engine, 32b×8192, SDP L=2 regceb)  ★ 옛 conv2_weight_bram(32b×1024) 대체
+//       — pre-transformed Winograd U operand (5888 word). loader → wide wmem.
 //   PS-write BMG 4종(Input/Conv1w/Conv2w/FCw)의 Port A 는 외부 포트로 노출 →
 //   block design 에서 AXI BRAM Controller 연결.
 //////////////////////////////////////////////////////////////////////////////////
@@ -83,11 +85,13 @@ module cnn_accelerator (
     input  wire [31:0] c1w_dina,
 
     //==========================================================================
-    // Conv2 weight BRAM Port A  (PS write, conv2_engine 내부 BMG)
+    // Conv2 weight BRAM Port A  (PS write, conv2_winograd_engine 내부 BMG)
+    //   ★ winograd: wino_weight_bram 32b×8192 (5888 used, pre-transformed U).
+    //     addra 10→13-bit (depth 1024→8192).  BD 의 conv2 weight AXI BRAM Ctrl/BMG 재구성.
     //==========================================================================
     input  wire        c2w_ena,
     input  wire [3:0]  c2w_wea,
-    input  wire [9:0]  c2w_addra,
+    input  wire [12:0] c2w_addra,
     input  wire [31:0] c2w_dina,
 
     //==========================================================================
@@ -261,9 +265,10 @@ module cnn_accelerator (
     );
 
     //==========================================================================
-    // DUT 1: Conv1
+    // DUT 1: Conv1  (★ conv1_2x = DSP 18→36 single-round drop-in. 포트 동일.
+    //   원본은 conv1_engine — RTL/conv1_2x/ 3종으로 교체. conv1_adder_tree 는 공유.)
     //==========================================================================
-    conv1_engine conv1 (
+    conv1_2x_engine conv1 (
         .clk          (clk),
         .rst          (rst),
         .start        (1'b0),                 // legacy (사용 X)
@@ -290,12 +295,16 @@ module cnn_accelerator (
     );
 
     //==========================================================================
-    // DUT 2: Conv2  (weight BMG 내부, Port A 외부 패스through)
+    // DUT 2: Conv2  (★ conv2_winograd_engine = 복소수 Winograd F(4,3) drop-in.
+    //   weight = PS-writable narrow BMG(wino_weight_bram 32b×8192)+loader → wide wmem.
+    //     기존 conv2 처럼 PS 가 c2w_* 로 pre-transformed U(=G·g·Gᵀ) write (5888 word).
+    //   포트 = conv2_engine 미러(c1c2/c2pool/handshake) + c2w_* Port A.
+    //   start: IDLE → LOAD_WEIGHTS(loader 1회) → WAIT_IMG → image loop.
     //==========================================================================
-    conv2_engine conv2 (
+    conv2_winograd_engine conv2 (
         .clk         (clk),
         .rst         (rst),
-        .start       (conv2_start_q),         // LOAD_WEIGHTS 1회
+        .start       (conv2_start_q),         // IDLE → LOAD_WEIGHTS → WAIT_IMG
 
         .c2w_ena     (c2w_ena),
         .c2w_wea     (c2w_wea),

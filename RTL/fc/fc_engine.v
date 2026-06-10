@@ -109,8 +109,21 @@ module fc_engine #(
     //   이전엔 `(bank ? (144 + s_cnt) : s_cnt)` 였는데 (144..287) maxpool 의 write
     //   range (256..399) 와 mismatch → bank 1 read 시 빈 영역에서 0 만 읽음.
     //==========================================================================
-    assign poolfc_re   = fsm_comp_v;
-    assign poolfc_addr = {fsm_input_bank_sel, fsm_s_cnt};
+    //   ★ 200MHz: read addr/en 을 1-cycle register (weight addr adder critical path 분리).
+    //     poolfc·weight 둘 다 동일하게 +1 → BMG dout 도착 T+2 → T+3. 아래 control tap 전부 +1.
+    reg        poolfc_re_r;
+    reg [8:0]  poolfc_addr_r;
+    always @(posedge clk) begin
+        if (rst) begin
+            poolfc_re_r   <= 1'b0;
+            poolfc_addr_r <= 9'd0;
+        end else begin
+            poolfc_re_r   <= fsm_comp_v;
+            poolfc_addr_r <= {fsm_input_bank_sel, fsm_s_cnt};
+        end
+    end
+    assign poolfc_re   = poolfc_re_r;
+    assign poolfc_addr = poolfc_addr_r;
 
     //==========================================================================
     // 3. Weight BRAM, 512-bit x 720, L=2 read latency
@@ -118,7 +131,20 @@ module fc_engine #(
     //    1 word = 16ch × 32b SIMD-A. fc_pe_array 가 lane 별 [ch*32 +:25] 를
     //    pe_cell.packed_w 로 직결 (재조립 없음).
     //==========================================================================
-    wire [9:0]   fcw_addrb = fsm_wbase + {2'd0, fsm_s_cnt};
+    //   ★ 200MHz: weight read addr = wbase + s_cnt (CARRY4 가산) → BRAM ADDRBWRADDR 가
+    //     워스트 경로(WNS -0.028, net 60%)였음. 1-cycle register 로 가산기를 BRAM setup 에서 분리.
+    //     enb 도 같이 register → poolfc 와 동일 +1 정렬 (위 read addr register / 아래 control tap +1).
+    reg        fcw_enb_r;
+    reg [9:0]  fcw_addrb_r;
+    always @(posedge clk) begin
+        if (rst) begin
+            fcw_enb_r   <= 1'b0;
+            fcw_addrb_r <= 10'd0;
+        end else begin
+            fcw_enb_r   <= fsm_comp_v;
+            fcw_addrb_r <= fsm_wbase + {2'd0, fsm_s_cnt};
+        end
+    end
     wire [511:0] fcw_doutb;
 
     fc_weight_bram fcw_bmg_inst (
@@ -129,8 +155,8 @@ module fc_engine #(
         .dina   (fcw_dina),
 
         .clkb   (clk),
-        .enb    (fsm_comp_v),
-        .addrb  (fcw_addrb),
+        .enb    (fcw_enb_r),
+        .addrb  (fcw_addrb_r),
         .doutb  (fcw_doutb),
         .regceb (1'b1)                     // 출력 reg always-follow (마지막 weight sp143 전파)
     );
@@ -163,18 +189,19 @@ module fc_engine #(
     //   T+11: accumulator update         — acc_en @ T+10 = 1 필요
     //
     // comp_pipe[k] @ cycle C = fsm_comp_v @ cycle (C-k-1) (1-cycle 등록 지연부터).
-    // poolfc 출력 register(L=2)로 데이터가 기존 L=1 대비 +1 늦으므로 모든 tap +1 시프트:
-    //   pe_en    = comp_pipe[1] | comp_pipe[2] | comp_pipe[3]
-    //                          | comp_pipe[4]                    (covers T+2..T+5)
-    //   adder_en = comp_pipe[5] | comp_pipe[6] | comp_pipe[7]
-    //                          | comp_pipe[8]                    (covers T+6..T+9)
-    //   acc_en/clear/last/pair = *_pipe[9]                       (covers T+10)
+    // poolfc/weight L=2 + read addr/en register(+1) → x & weight 가 issue 기준 T+3 도착
+    // (원 L=1 대비 +2). 모든 tap 을 기존 L=2 정렬에서 다시 +1 시프트:
+    //   pe_en    = comp_pipe[2] | comp_pipe[3] | comp_pipe[4]
+    //                          | comp_pipe[5]                    (covers T+3..T+6)
+    //   adder_en = comp_pipe[6] | comp_pipe[7] | comp_pipe[8]
+    //                          | comp_pipe[9]                    (covers T+7..T+10)
+    //   acc_en/clear/last/pair = *_pipe[10]                      (covers T+11)
     //
     // 주의: accumulator 의 logit 캡처는 "acc + sum" 형태로 마지막 spatial 포함.
     // (RTL/fc/fc_accumulator.v 의 last=1 branch 참조; sp(last) 가 acc0_OLD 에
     //  아직 없을 때도 combinational add 로 logit 에 반영.)
     //==========================================================================
-    localparam CTRL_DELAY = 9;   // poolfc output register(L=2) 반영: 기존 8 +1
+    localparam CTRL_DELAY = 10;  // poolfc L=2(+1) + read addr/en register(+1): 기존 9 +1
 
     reg [CTRL_DELAY:0] comp_pipe;
     reg [CTRL_DELAY:0] first_pipe;
@@ -204,8 +231,8 @@ module fc_engine #(
         end
     end
 
-    wire pe_en    = comp_pipe[1] | comp_pipe[2] | comp_pipe[3] | comp_pipe[4];
-    wire adder_en = comp_pipe[5] | comp_pipe[6] | comp_pipe[7] | comp_pipe[8];
+    wire pe_en    = comp_pipe[2] | comp_pipe[3] | comp_pipe[4] | comp_pipe[5];
+    wire adder_en = comp_pipe[6] | comp_pipe[7] | comp_pipe[8] | comp_pipe[9];
 
     wire       acc_en    = comp_pipe [CTRL_DELAY];
     wire       acc_clear = first_pipe[CTRL_DELAY];

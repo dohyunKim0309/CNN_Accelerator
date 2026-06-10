@@ -49,7 +49,7 @@ module fc_fsm (
 
     // Datapath latency drain margin.
     // Engine aligns control internally; this just keeps busy long enough after last issue.
-    localparam [3:0] DRAIN_MAX = 4'd11;   // poolfc L=2(+1) 반영: datapath drain margin (기존 10 +1)
+    localparam [3:0] DRAIN_MAX = 4'd12;   // poolfc L=2 + read addr/en register(+1): 기존 11 +1
 
     reg [1:0] state;
     reg [3:0] drain_cnt;

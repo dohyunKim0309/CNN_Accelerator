@@ -25,7 +25,7 @@
 
 module tb_conv2_winograd_engine_multi;
 
-    parameter N_IMAGES = 40;      // user gate (data 는 100 까지 지원)
+    parameter N_IMAGES = 100;     // user gate (data 는 100 까지 지원)
     parameter N_WWORD  = 5888;    // pre-transformed U operand word
     parameter CLK = 10;
     reg clk = 0, rst = 1;

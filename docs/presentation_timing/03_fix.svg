@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" font-family="'Apple SD Gothic Neo','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <marker id="aR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker>
+    <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16A34A"/></marker>
+  </defs>
+
+  <rect width="1280" height="720" fill="#FFFFFF"/>
+
+  <!-- title bar -->
+  <rect width="1280" height="92" fill="#0F172A"/>
+  <text x="56" y="57" fill="#FFFFFF" font-size="37" font-weight="700">해결 — 주소 가산기를 register 로 분리</text>
+  <text x="1224" y="56" fill="#94A3B8" font-size="19" text-anchor="end">재현적 Timing Closure</text>
+
+  <!-- top note -->
+  <text x="56" y="134" font-size="21" fill="#475569">place seed 는 유사-랜덤 (<tspan fill="#DC2626" font-weight="700">−0.028 ↔ −1.396</tspan> 출렁) → 운에 맡기지 말고 <tspan fill="#16A34A" font-weight="700">RTL 로 확실히</tspan></text>
+
+  <!-- Before box -->
+  <rect x="56" y="156" width="558" height="172" rx="10" fill="#FEF7F7" stroke="#DC2626" stroke-width="1.8" stroke-dasharray="7 6"/>
+  <text x="80" y="186" font-size="20" font-weight="700" fill="#DC2626">Before — 조합 가산이 BRAM 직결</text>
+  <rect x="80" y="214" width="158" height="50" rx="7" fill="#FFFFFF" stroke="#94A3B8"/>
+  <text x="159" y="244" font-size="17" fill="#1E293B" text-anchor="middle">wbase + s_cnt</text>
+  <circle cx="300" cy="239" r="24" fill="#FEF3C7" stroke="#D97706"/>
+  <text x="300" y="248" font-size="24" font-weight="700" fill="#B45309" text-anchor="middle">+</text>
+  <rect x="426" y="214" width="140" height="50" rx="7" fill="#EFF6FF" stroke="#2563EB"/>
+  <text x="496" y="244" font-size="17" fill="#1D4ED8" text-anchor="middle">BRAM 주소</text>
+  <line x1="238" y1="239" x2="274" y2="239" stroke="#DC2626" stroke-width="2.4" marker-end="url(#aR)"/>
+  <line x1="324" y1="239" x2="426" y2="239" stroke="#DC2626" stroke-width="2.4" marker-end="url(#aR)"/>
+  <text x="80" y="306" font-size="17" font-weight="700" fill="#DC2626">FF → 가산 → BRAM = 한 cycle (5 ns 초과)</text>
+
+  <!-- After box -->
+  <rect x="666" y="156" width="558" height="172" rx="10" fill="#F4FCF6" stroke="#16A34A" stroke-width="1.8" stroke-dasharray="7 6"/>
+  <text x="690" y="186" font-size="20" font-weight="700" fill="#16A34A">After — register 1단 삽입</text>
+  <rect x="688" y="214" width="120" height="50" rx="7" fill="#FFFFFF" stroke="#94A3B8"/>
+  <text x="748" y="244" font-size="15" fill="#1E293B" text-anchor="middle">wbase + s_cnt</text>
+  <circle cx="852" cy="239" r="20" fill="#FEF3C7" stroke="#D97706"/>
+  <text x="852" y="247" font-size="21" font-weight="700" fill="#B45309" text-anchor="middle">+</text>
+  <rect x="900" y="214" width="74" height="50" rx="7" fill="#DCFCE7" stroke="#16A34A"/>
+  <text x="937" y="244" font-size="16" font-weight="700" fill="#15803D" text-anchor="middle">reg</text>
+  <rect x="1044" y="214" width="140" height="50" rx="7" fill="#EFF6FF" stroke="#2563EB"/>
+  <text x="1114" y="244" font-size="16" fill="#1D4ED8" text-anchor="middle">BRAM 주소</text>
+  <line x1="808" y1="239" x2="828" y2="239" stroke="#16A34A" stroke-width="2.2" marker-end="url(#aG)"/>
+  <line x1="872" y1="239" x2="900" y2="239" stroke="#16A34A" stroke-width="2.2" marker-end="url(#aG)"/>
+  <line x1="974" y1="239" x2="1044" y2="239" stroke="#16A34A" stroke-width="2.2" marker-end="url(#aG)"/>
+  <text x="690" y="306" font-size="17" font-weight="700" fill="#16A34A">가산 → reg | reg → BRAM = 두 cycle 로 분리</text>
+
+  <!-- alignment box -->
+  <rect x="56" y="356" width="1168" height="116" rx="8" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="86" y="392" font-size="20" font-weight="700" fill="#0F172A">파이프 정렬 (FC weight read 가 +1 늦어지므로)</text>
+  <text x="86" y="426" font-size="19" fill="#334155">poolfc read 도 +1 → data ↔ weight 정렬 유지, control 파이프 전부 +1 시프트</text>
+  <text x="86" y="456" font-size="17" fill="#64748B" font-family="ui-monospace,Menlo,monospace">CTRL_DELAY 9→10  ·  pe_en / adder_en tap +1  ·  fc_fsm DRAIN 11→12</text>
+
+  <!-- result box (green) -->
+  <rect x="56" y="490" width="1168" height="198" rx="8" fill="#F0FDF4" stroke="#BBF7D0"/>
+  <rect x="56" y="490" width="6" height="198" fill="#16A34A"/>
+  <text x="86" y="528" font-size="22" font-weight="700" fill="#15803D">결과</text>
+  <text x="86" y="566" font-size="20" fill="#334155">✓  iverilog full pipeline <tspan font-weight="700">40 / 40</tspan>  logit bit-exact + bram_output readback</text>
+  <text x="86" y="600" font-size="20" fill="#334155">✓  throughput <tspan font-weight="700">1799 cyc/img 유지</tspan>  (FC terminal → latency +1 cycle, 무해)</text>
+  <text x="86" y="634" font-size="20" fill="#334155">✓  placement 운과 무관하게 <tspan font-weight="700">재현적으로 timing closure</tspan></text>
+  <text x="86" y="672" font-size="18" font-style="italic" fill="#15803D">→ −0.028 ns 의 근본 원인(가산기 → BRAM 직결)을 제거</text>
+</svg>

@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" font-family="'Apple SD Gothic Neo','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="arR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker>
+  </defs>
+
+  <rect width="1280" height="720" fill="#FFFFFF"/>
+
+  <!-- title bar -->
+  <rect width="1280" height="92" fill="#0F172A"/>
+  <text x="56" y="57" fill="#FFFFFF" font-size="37" font-weight="700">진짜 병목 — FC weight 주소 가산기</text>
+  <text x="1224" y="56" fill="#94A3B8" font-size="19" text-anchor="end">200 MHz Timing Closure</text>
+
+  <!-- WNS progression -->
+  <text x="56" y="138" font-size="22" fill="#475569">clk(clk_out3) 제대로 연결 → 진짜 200 MHz 노출 :
+    <tspan fill="#94A3B8">+0.248ns 가짜</tspan> <tspan fill="#475569">→</tspan> <tspan fill="#DC2626" font-weight="700">−0.101 → −0.028 ns</tspan> <tspan fill="#475569">(worst endpoint 1개)</tspan></text>
+
+  <!-- code box -->
+  <rect x="56" y="156" width="1168" height="80" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/>
+  <text x="80" y="188" font-size="17" fill="#64748B" font-family="ui-monospace,Menlo,monospace">// RTL/fc/fc_engine.v  (line 121)</text>
+  <text x="80" y="219" font-size="21" fill="#1E293B" font-family="ui-monospace,Menlo,monospace">wire [9:0] fcw_addrb = <tspan fill="#DC2626" font-weight="700">fsm_wbase + s_cnt</tspan> ;   →  fc_weight_bram 주소</text>
+
+  <!-- critical path label -->
+  <text x="74" y="278" font-size="18" fill="#DC2626" font-weight="700">Critical path  (FF → 가산 → BRAM, register 없음)</text>
+  <!-- dashed boundary -->
+  <rect x="72" y="288" width="724" height="192" rx="10" fill="none" stroke="#DC2626" stroke-width="2" stroke-dasharray="7 6"/>
+
+  <!-- diagram boxes -->
+  <rect x="92" y="300" width="188" height="56" rx="8" fill="#FFFFFF" stroke="#334155" stroke-width="1.6"/>
+  <text x="186" y="324" font-size="19" font-weight="700" fill="#1E293B" text-anchor="middle">wbase_reg</text>
+  <text x="186" y="345" font-size="15" fill="#64748B" text-anchor="middle">(= pair × 144)</text>
+
+  <rect x="92" y="398" width="188" height="56" rx="8" fill="#FFFFFF" stroke="#334155" stroke-width="1.6"/>
+  <text x="186" y="432" font-size="19" font-weight="700" fill="#1E293B" text-anchor="middle">s_cnt</text>
+
+  <!-- adder node -->
+  <circle cx="388" cy="377" r="37" fill="#FEF3C7" stroke="#D97706" stroke-width="1.8"/>
+  <text x="388" y="389" font-size="34" font-weight="700" fill="#B45309" text-anchor="middle">+</text>
+  <text x="388" y="438" font-size="15" fill="#B45309" text-anchor="middle">CARRY4 ×2 (10-bit)</text>
+
+  <!-- arrows into adder -->
+  <line x1="280" y1="328" x2="352" y2="364" stroke="#334155" stroke-width="2.2" marker-end="url(#ar)"/>
+  <line x1="280" y1="426" x2="352" y2="390" stroke="#334155" stroke-width="2.2" marker-end="url(#ar)"/>
+
+  <!-- BRAM box -->
+  <rect x="524" y="334" width="252" height="86" rx="8" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.8"/>
+  <text x="650" y="370" font-size="19" font-weight="700" fill="#1D4ED8" text-anchor="middle">fc_weight_bram</text>
+  <text x="650" y="396" font-size="16" fill="#3B82F6" text-anchor="middle">ADDRBWRADDR[14]</text>
+
+  <!-- arrow adder -> BRAM (red) -->
+  <line x1="426" y1="377" x2="524" y2="377" stroke="#DC2626" stroke-width="2.6" marker-end="url(#arR)"/>
+  <text x="475" y="362" font-size="14" fill="#DC2626" font-weight="700" text-anchor="middle">한 cycle</text>
+  <text x="475" y="403" font-size="13" fill="#DC2626" text-anchor="middle">(5 ns)</text>
+
+  <!-- right-side note next to diagram -->
+  <text x="828" y="330" font-size="20" font-weight="700" fill="#0F172A">왜 덧셈이 필요했나?</text>
+  <text x="828" y="362" font-size="18" fill="#334155">주소 = pair × 144 + s_cnt</text>
+  <text x="828" y="392" font-size="18" fill="#334155">144 ≠ 2ⁿ  → 비트 concat 불가</text>
+  <text x="828" y="422" font-size="18" fill="#DC2626" font-weight="700">→ 진짜 가산기가 BRAM 직결</text>
+  <text x="828" y="456" font-size="16" fill="#64748B">(256 배수였다면 concat = 가산기 0)</text>
+
+  <!-- explanation box -->
+  <rect x="56" y="500" width="1168" height="184" rx="8" fill="#FEF2F2" stroke="#FECACA"/>
+  <rect x="56" y="500" width="6" height="184" fill="#DC2626"/>
+  <text x="86" y="540" font-size="20" font-weight="700" fill="#B91C1C">한 cycle(5 ns) 안에 [ FF clock-to-out → 10-bit 가산 → BRAM 주소 setup ] 을 다 해야 함</text>
+  <text x="86" y="576" font-size="19" fill="#334155">●  여기에 net delay 60% (레지스터 ↔ BRAM 거리) + clock skew −0.183 이 겹쳐 5 ns 초과</text>
+  <text x="86" y="608" font-size="19" fill="#334155">●  Logic 3-level (LUT2 + CARRY4×2) · High Fanout 8 (작음 → 복제로는 안 됨)</text>
+  <text x="86" y="652" font-size="17" font-style="italic" fill="#64748B">※ 항상 아슬아슬했던 경로 — 예전엔 placement 운으로 닫혔고, 이번엔 운이 나빠 worst 로 노출됨</text>
+</svg>

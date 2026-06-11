@@ -69,6 +69,25 @@
 
 ---
 
+## Iteration 5 — 아키텍처: V-stationary + gather 분할 (2026-06-11, Claude/Fable 5)
+- **문제 재정의**: Iter 4 로 깊은 조합블록은 제거됐으나 200MHz 미달 지속. 근본원인 재분석
+  (`WINOGRAD_200MHZ_CLOSURE_PLAN.md`): 남은 벽은 max_fanout 으로 복제 *불가능한* 부류 —
+  **fanout-1 광폭 distinct-data 버스의 per-cycle 전역 이동** (a_flat 2576b scatter +
+  184-DSP product gather). baseline 이 닫힌 이유 = 그쪽 벽은 전부 "동일값 broadcast"
+  (복제 가능 부류)였기 때문. 같은 처방이 안 듣는 게 당연했음.
+- **해결** (복붙 = engine + mul_array):
+  1. **V-stationary** (weight per-PE RAM 과 대칭): per-PE V 더블버퍼(4×VW) + 4:1 mux →
+     per-cycle B-port 경로 완전 local. select = act_q2/grp_q2 1-bit broadcast(복제 가능).
+     적재 = prefetch(tile t 중 t+1 변환→dist1→dist2→vbuf, 전 hop register, tile-rate).
+     이미지당 PRIME 5 cyc 선적재. rb 36-way read·입력변환이 per-cycle 경로에서 소멸.
+  2. **G-1 gather 분할**: mul_array lane-local lpre_q/lpim_q → [PREG→lane_reduce] |
+     [cross-lane 합] 분리. +1 latency (tag 9→10, vld/grp_pipe 5단).
+- **결과**: iverilog standalone **100/100** + full pipeline **100/100** bit-exact,
+  **1347 cyc/img** (1341+6, throughput 동일·latency-only). Vivado 재합성 대기.
+  상세 계획/fallback ladder = 프로젝트 루트 `WINOGRAD_200MHZ_CLOSURE_PLAN.md`.
+
+---
+
 ## §A. 정적 타이밍 카탈로그 (전 모듈 리뷰)
 
 ### A.1 per-cycle datapath stage 맵 (현재)

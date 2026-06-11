@@ -16,6 +16,20 @@
 //   producer(row load) ∥ consumer(compute) ∥ writer(c2pool), 2-set row-buffer ping-pong.
 //   첫 start → LOAD_WEIGHTS(~5888 cyc loader) → 이후 image loop.
 //   ★ Vivado: TB/models(dsp48e1_model/bmg_sim_models) 제외, 실 BMG IP(wino_weight_bram).
+//
+//   ★★ V-stationary 아키텍처 (200MHz, WINOGRAD_200MHZ_CLOSURE_PLAN.md §2):
+//     V(입력변환 결과)는 tile 당 32-cyc 상수 → per-cycle 전역 산포(a_flat 2576b
+//     scatter)가 200MHz 미달의 근본원인이었음. 해법 = weight 경로와 대칭:
+//     - per-PE V 더블버퍼(vb0/vb1 × grp0/grp1): per-cycle B-port 경로가
+//       [vbuf → 4:1 mux(1 LUT) → DSP BREG] 완전 local.
+//     - mux select = act_q2(tile parity)/grp_q2 — 1-bit broadcast(max_fanout 복제).
+//     - 적재 = prefetch: tile t 계산 중(cc==19 seed) tile t+1 을 rb read → 입력변환
+//       (2-stage) → dist1→dist2(2-hop 분배 register) → 비활성 bank write. 모든 hop 이
+//       register 로 분리 (tile-rate, 32-cyc 에 1회).
+//     - 이미지 첫 tile 은 PRIME state(5 cyc)에서 선적재. cyc/img +6 (1341→1347).
+//     - rb 36-way read + 입력변환 전체가 per-cycle 경로에서 제거됨 (tile 당 1회).
+//     bit-exact: BREG 가 보는 B 값 시퀀스는 종전과 동일 (tile6_q 경유 즉시변환과
+//     vbuf 경유 선적재가 같은 값) → golden 유지. iverilog 100/100 재검증.
 //////////////////////////////////////////////////////////////////////////////////
 
 module conv2_winograd_engine (
@@ -46,8 +60,10 @@ module conv2_winograd_engine (
 
     // FSM
     localparam [2:0] IDLE=3'd0, WAIT_IMG=3'd1, LOAD_INIT=3'd2, RUN=3'd3, DRAIN=3'd4,
-                     LOAD_WEIGHTS=3'd5;       // 첫 start 1회 (weight loader)
+                     LOAD_WEIGHTS=3'd5,       // 첫 start 1회 (weight loader)
+                     PRIME=3'd6;              // ★ V-stationary: 첫 tile V 선적재 (5 cyc/img)
     reg [2:0] state;
+    reg [2:0] prime_cnt;
 
     //==========================================================================
     // Handshake (conv2_fsm 미러)
@@ -147,32 +163,85 @@ module conv2_winograd_engine (
     assign c1c2_addr = {input_bank_sel, c1c2_row, pld_col};     // PDRAIN: (row5,col25) 유지
 
     //==========================================================================
-    // row_buffers (write=producer L2, read=consumer 조합)
+    // ★ V-stationary prefetch 시퀀서 (plan §2.1A)
+    //   tile t 계산 중 cc==19 에 seed → 다음 tile(t+1) 좌표 latch → cc==20 rb read
+    //   capture(tile6_q) → 입력변환 2-stage → dist1 → dist2 → 비활성 vbuf bank write.
+    //   stable @ tilestart+25 ≤ 첫 사용(다음 tile 첫 issue +2 = tilestart+34). 마진 9.
+    //   producer 와의 race (cross-trow, tile5 에서 trow+1 의 tile0 read):
+    //   read @ trowstart+160+20=+180 ≥ producer 마지막 write(+~161). 마진 ~19.
+    //   PRIME(이미지 첫 tile): LOAD_INIT 종료 직전 seed → P0 capture → P5(RUN 첫 issue)
+    //   전에 bank0 stable. 마지막 tile(35)은 seed 생략 (다음 tile 없음).
+    //==========================================================================
+    reg        tpar;                       // 현재 tile 의 global parity (PRIME 에서 0)
+    reg        act_q;
+    (* max_fanout = 32 *) reg act_q2;      // per-PE vbuf bank select (issue+2 정렬)
+    wire tile_adv = (state==RUN) && compute_active && (compute_cnt==5'd31) && !last_issue;
+    always @(posedge clk) begin
+        if (rst)              tpar <= 1'b0;
+        else if (state==PRIME) tpar <= 1'b0;
+        else if (tile_adv)    tpar <= ~tpar;
+    end
+    always @(posedge clk) begin act_q <= tpar; act_q2 <= act_q; end
+
+    // seed: PRIME 진입 직전(LOAD_INIT 마지막 cycle) 또는 RUN cc==19 (마지막 tile 제외)
+    wire       pf_seed_prime = (state==LOAD_INIT) && set_ready[0];
+    wire       pf_seed_run   = (state==RUN) && compute_active && (compute_cnt==5'd19)
+                               && !((trow_cnt==3'd5) && (tile_cnt==3'd5));
+    wire [2:0] pf_nxt_tx = (tile_cnt==3'd5) ? 3'd0 : tile_cnt + 3'd1;
+    wire [2:0] pf_nxt_ty = (tile_cnt==3'd5) ? trow_cnt + 3'd1 : trow_cnt;
+
+    // prefetch 좌표/bank + stage 플래그 체인 (각 CE 는 tile-rate 지만 STA 는 per-cycle
+    // → 광폭 CE(2304/5152/184PE)는 max_fanout 복제)
+    (* max_fanout = 40 *) reg       pf_set_r;   // rb rd_set
+    (* max_fanout = 40 *) reg [2:0] pf_tx_r;    // rb rd_tx
+    (* max_fanout = 32 *) reg       pf_bank;    // vbuf write bank = ~tpar(seed 시)
+    (* max_fanout = 64 *) reg       pf_cap;     // tile6_q CE (2304b)
+    reg                             pf_s1;
+    (* max_fanout = 64 *) reg       pf_d1ce;    // dist1 CE (5152b)
+    (* max_fanout = 64 *) reg       pf_d2ce;    // dist2 CE (5152b)
+    (* max_fanout = 32 *) reg       pf_we;      // per-PE vbuf write (184 PE)
+    always @(posedge clk) begin
+        if (rst) begin
+            pf_set_r<=1'b0; pf_tx_r<=3'd0; pf_bank<=1'b0;
+            pf_cap<=1'b0; pf_s1<=1'b0; pf_d1ce<=1'b0; pf_d2ce<=1'b0; pf_we<=1'b0;
+        end else begin
+            if (pf_seed_prime)      begin pf_set_r<=1'b0;          pf_tx_r<=3'd0;      pf_bank<=1'b0;   end
+            else if (pf_seed_run)   begin pf_set_r<=pf_nxt_ty[0];  pf_tx_r<=pf_nxt_tx; pf_bank<=~tpar;  end
+            pf_cap  <= pf_seed_prime | pf_seed_run;
+            pf_s1   <= pf_cap;
+            pf_d1ce <= pf_s1;
+            pf_d2ce <= pf_d1ce;
+            pf_we   <= pf_d2ce;
+        end
+    end
+
+    //==========================================================================
+    // row_buffers (write=producer L2, read=prefetch 전용 — per-cycle 경로에서 제거)
     //==========================================================================
     wire [6*6*64-1:0] tile6;
     wino_row_buffers u_rb (
         .clk(clk), .rst(rst),
         .wr_en(pw_v2), .wr_set(pw_set2), .wr_row(pw_row2), .wr_col(pw_col2), .wr_data(c1c2_dout),
-        .rd_set(trow_cnt[0]), .rd_tx(tile_cnt), .tile6_flat(tile6)
+        .rd_set(pf_set_r), .rd_tx(pf_tx_r), .tile6_flat(tile6)
     );
 
     //==========================================================================
-    // ★ class B fix (재정렬 0): register 를 transform 앞(tile6_q)으로 이동.
-    //   기존 [rb_read→transform→grp-mux→a_flat_q] 한 cycle → 분할:
-    //     stage1 [rb_read → tile6_q],  stage2 [tile6_q → transform → grp-mux → DSP BREG].
-    //   DSP 입력 register(BREG, CEB2=en)가 2번째 단 → issue→M latency·tag·collector 불변
-    //   (옛 a_flat_q 와 동일 +1). tile_cnt fanout(rb_read) 를 transform 과 분리.
-    //   tile6 는 tile 당 32-cyc 상수라 register 무해.  grp_q=grp(stage2 grp-mux 정렬).
+    // tile6_q: prefetch capture 에만 latch (tile 당 1회) — rb 36-way read 가
+    //   per-cycle 경로에서 사라짐.  grp_q2 는 per-PE mux select 정렬용 유지.
     //==========================================================================
     reg [6*6*64-1:0] tile6_q;
-    // grp_q2 = grp-mux select → 4 lane × 46 op × VW = 2576 mux fanout (최대 broadcast).
-    //   max_fanout 으로 복제 → lane cluster 근처에서 select (baseline broadcast 동류).
     reg              grp_q;
-    (* max_fanout = 32 *) reg grp_q2;   // 입력변환 +1 만큼 grp-mux 정렬
-    always @(posedge clk) begin tile6_q <= tile6; grp_q <= grp; grp_q2 <= grp_q; end
+    (* max_fanout = 32 *) reg grp_q2;   // per-PE 4:1 mux select (issue+2 정렬)
+    always @(posedge clk) begin
+        if (pf_cap) tile6_q <= tile6;
+        grp_q <= grp; grp_q2 <= grp_q;
+    end
 
     //==========================================================================
-    // 8 input transforms + grp mux → a_flat (4 lane × 46)  [tile6_q → comb → DSP BREG]
+    // 8 input transforms (prefetch 전용, tile 당 1회 사용) + 분배 파이프 dist1→dist2
+    //   [treg→stage2→dist1] (logic+local), [dist1→dist2], [dist2→vbuf] (net hop 분리)
+    //   → 어느 hop 도 5ns 안에 logic+die-spanning net 이 직렬로 들지 않음.
+    //   a_flat(per-cycle 2576b scatter)은 per-PE vbuf 로 대체 (아래 g_wpe).
     //==========================================================================
     wire [46*VW-1:0] a_ic [0:7];
     genvar ic, pp;
@@ -185,12 +254,17 @@ module conv2_winograd_engine (
             wino_input_transform #(.DW(8), .VW(VW)) u_it (.clk(clk), .d_flat(d_flat_ic), .a_flat(a_ic[ic]));
         end
     endgenerate
-    wire [4*46*VW-1:0] a_flat;
+    wire [8*46*VW-1:0] aic_flat;            // a_ic[0..7] concat (ic-major)
     generate
-        for (pp=0; pp<4; pp=pp+1) begin : glane
-            assign a_flat[pp*46*VW +: 46*VW] = grp_q2 ? a_ic[4+pp] : a_ic[pp];
+        for (ic=0; ic<8; ic=ic+1) begin : gaic
+            assign aic_flat[ic*46*VW +: 46*VW] = a_ic[ic];
         end
     endgenerate
+    reg [8*46*VW-1:0] dist1, dist2;         // 분배 파이프 (reset-free, pf 마스킹)
+    always @(posedge clk) begin
+        if (pf_d1ce) dist1 <= aic_flat;
+        if (pf_d2ce) dist2 <= dist1;
+    end
 
     //==========================================================================
     // weight: PS narrow BMG(wino_weight_bram) → loader → wide wmem (ROM 대체).
@@ -228,8 +302,10 @@ module conv2_winograd_engine (
     //   compute_cnt 와 매 cycle 동일값(같은 next-state lockstep) → weight read 지연 0,
     //   activation alignment 불변.  keep 으로 4개 물리 레지스터 보존(equiv-merge 방지).
     //==========================================================================
+    // ★ PRIME 중에도 0 유지: cnt_l 이 stale compute_cnt(31)를 재적재하면 RUN 첫
+    //   issue 가 wmem[31](oc15/grp1)을 읽는 lockstep 깨짐 (iverilog 98/100 으로 검출).
     wire [4:0] compute_cnt_nxt =
-        (state==LOAD_INIT && set_ready[0])            ? 5'd0 :
+        ((state==LOAD_INIT && set_ready[0]) || (state==PRIME)) ? 5'd0 :
         (state==RUN && compute_active && !last_issue) ?
             ((compute_cnt==5'd31) ? 5'd0 : compute_cnt + 5'd1) :
         compute_cnt;
@@ -253,6 +329,7 @@ module conv2_winograd_engine (
     //           mul array 가 보는 weight 값·L=1 타이밍 모두 동일 → 동작 bit-exact 보존.
     //==========================================================================
     wire [4*46*UW-1:0] w_q;      // per-PE 출력 concat (= 옛 w_flat_q 와 동일 레이아웃)
+    wire [4*46*VW-1:0] a_flat;   // ★ per-PE vbuf mux 출력 (per-cycle 완전 local)
     genvar gop;
     generate for (gop = 0; gop < 4*46; gop = gop+1) begin : g_wpe
         (* ram_style = "distributed" *)
@@ -264,17 +341,36 @@ module conv2_winograd_engine (
             w_q_op2 <= w_q_op;                                                // weight +1 (입력변환 파이프 정렬)
         end
         assign w_q[gop*UW +: UW] = w_q_op2;
+
+        // ★ V-stationary per-PE 더블버퍼 (weight wmem_op 와 대칭).
+        //   lane L=gop/46, op i=gop%46: grp0 값 = a_ic[L][i] = dist2[gop*VW],
+        //   grp1 값 = a_ic[L+4][i] = dist2[(gop+184)*VW].  write = prefetch (tile-rate),
+        //   read = act_q2/grp_q2 1-bit select 4:1 mux → DSP B-port (BREG). reset-free.
+        reg [VW-1:0] vb0g0, vb0g1, vb1g0, vb1g1;
+        always @(posedge clk) begin
+            if (pf_we && !pf_bank) begin
+                vb0g0 <= dist2[gop*VW +: VW];
+                vb0g1 <= dist2[(gop+184)*VW +: VW];
+            end
+            if (pf_we &&  pf_bank) begin
+                vb1g0 <= dist2[gop*VW +: VW];
+                vb1g1 <= dist2[(gop+184)*VW +: VW];
+            end
+        end
+        assign a_flat[gop*VW +: VW] = act_q2 ? (grp_q2 ? vb1g1 : vb1g0)
+                                             : (grp_q2 ? vb0g1 : vb0g0);
     end endgenerate
 
     reg [3:0] mdrain_cnt;
-    wire mul_en  = compute_active || (state==DRAIN && mdrain_cnt < 4'd8);  // +3 (issue reg + 입력변환 +1 + reduce +1)
+    // drain window: 마지막 issue T_L 후 m latch(T_L+8, G-1 +1 포함)까지 array en 필요
+    //   = mul_en@(T_L+6).  mdrain<8 → mul_en T_L+1..T_L+8 (마진 2).
+    wire mul_en  = compute_active || (state==DRAIN && mdrain_cnt < 4'd8);
     wire mul_grp = compute_active ? grp : 1'b0;
 
     //==========================================================================
-    // ★ 200MHz #1: DSP 입력 직전 register stage (en/grp 만).  activation 은 위 tile6_q +
-    //   DSP BREG 로 2-stage 분할(class B fix) → a_flat 은 comb 로 mul array 에 직접.
-    //   weight 는 per-PE wmem L=1 read(w_q)가 같은 +1 정렬 제공(DSP A-port).
-    //   ⇒ issue→M 는 +1(=옛 a_flat_q 와 동일), tag pipeline 5 / collector tag[7] 불변.
+    // ★ 200MHz #1: DSP 입력 직전 register stage (en/grp).  activation 은 per-PE vbuf
+    //   (V-stationary) → a_flat 은 PE-local mux 출력으로 mul array 에 직접 (BREG +1).
+    //   weight 는 per-PE wmem L=1+1 read(w_q_op2)가 같은 +2 정렬 제공(DSP A-port).
     //==========================================================================
     // ★ mul_en_q2 = DSP CE → 184 DSP × {CEA2,CEB2,CEM,CEP} = 736 fanout (baseline pe_en/shift_en 동류).
     //   max_fanout 으로 driver 복제 → DSP cluster 근처에서 출발 (floorplan 불가한 DSP 고정열 대응).
@@ -294,20 +390,20 @@ module conv2_winograd_engine (
     );
 
     //==========================================================================
-    // tag pipeline (oc/trow/tcol) — issue register stage(+1) 포함 → m_valid 5-cyc 정렬
-    //   m_valid = (등록된 grp1 issue)+4 = (compute context)+1+4 = +5. 따라서 tag delay 4→5.
+    // tag pipeline (oc/trow/tcol) — issue→m_valid = +8 (DSP 3 + lane reg(G-1) +
+    //   cross-lane reg(C-1) + 입력측 +2 정렬).  출력변환 +2, trunc +1, cwe +1
+    //   → collector 가 tg_*[10] 사용 (G-1 로 옛 [9] 에서 +1).
     //==========================================================================
     wire [3:0] issue_oc   = compute_cnt[4:1];
-    // tag depth 5→7: 출력변환 파이프라인(+2) 만큼 연장 → collector 가 tg_*[7] 사용
-    reg  [3:0] tg_oc   [1:9];
-    reg  [2:0] tg_trow [1:9];
-    reg  [2:0] tg_tcol [1:9];
+    reg  [3:0] tg_oc   [1:10];
+    reg  [2:0] tg_trow [1:10];
+    reg  [2:0] tg_tcol [1:10];
     integer ti;
     always @(posedge clk) begin
-        if (rst) for (ti=1; ti<=9; ti=ti+1) begin tg_oc[ti]<=0; tg_trow[ti]<=0; tg_tcol[ti]<=0; end
+        if (rst) for (ti=1; ti<=10; ti=ti+1) begin tg_oc[ti]<=0; tg_trow[ti]<=0; tg_tcol[ti]<=0; end
         else begin
             tg_oc[1]<=issue_oc; tg_trow[1]<=trow_cnt; tg_tcol[1]<=tile_cnt;
-            for (ti=2; ti<=9; ti=ti+1) begin
+            for (ti=2; ti<=10; ti=ti+1) begin
                 tg_oc[ti]<=tg_oc[ti-1]; tg_trow[ti]<=tg_trow[ti-1]; tg_tcol[ti]<=tg_tcol[ti-1];
             end
         end
@@ -330,7 +426,7 @@ module conv2_winograd_engine (
     //==========================================================================
     // collector → tile_out[bank=tcol[0]][pixel][oc]  (trunc_out 는 ot_valid+1 = m_valid+3)
     //   cwe = ot_valid 1-cyc 지연 → 이 cycle 에 trunc_out/coc 유효, posedge 에서 tile_out 기록.
-    //   출력변환 +2 → coc/tag 는 tg_*[7] (= 옛 [5] + 2) 로 정렬.
+    //   coc/tag 는 tg_*[10] (issue+8 M + OT+2 → cwe cycle 에 [10] = issue context).
     //==========================================================================
     reg [7:0] tile_out [0:1][0:15][0:15];
     reg       cwe;
@@ -342,7 +438,7 @@ module conv2_winograd_engine (
     always @(posedge clk) begin
         if (rst) begin cwe<=0; coc<=0; coc_trow<=0; coc_tcol<=0; tile_done<=0; done_trow<=0; done_tcol<=0; end
         else begin
-            cwe<=ot_valid; coc<=tg_oc[9]; coc_trow<=tg_trow[9]; coc_tcol<=tg_tcol[9];
+            cwe<=ot_valid; coc<=tg_oc[10]; coc_trow<=tg_trow[10]; coc_tcol<=tg_tcol[10];
             tile_done<=1'b0;
             if (cwe) begin
                 for (pidx=0; pidx<16; pidx=pidx+1)
@@ -399,15 +495,24 @@ module conv2_winograd_engine (
     always @(posedge clk) begin
         if (rst) begin
             state<=IDLE; compute_cnt<=0; tile_cnt<=0; trow_cnt<=0; compute_active<=0; mdrain_cnt<=0; rdone_r<=0;
+            prime_cnt<=0;
         end else begin
             rdone_r<=1'b0;
             case (state)
                 IDLE:         if (start) state<=LOAD_WEIGHTS;     // 첫 start → weight load
                 LOAD_WEIGHTS: if (loader_done) state<=WAIT_IMG;   // 1회, 이후 image loop
                 WAIT_IMG:  if (ready_to_compute) state<=LOAD_INIT;
-                LOAD_INIT: if (set_ready[0]) begin
+                LOAD_INIT: if (set_ready[0]) begin                // ★ V-stationary: PRIME 경유
+                               state<=PRIME; prime_cnt<=3'd0;     //   (seed 는 이 cycle, pf_seed_prime)
+                           end
+                // PRIME P0..P4: tile(0,0) capture→변환→dist→vbuf bank0 write.
+                //   P5 부터 RUN 첫 issue — 첫 사용(issue+2 = P7)에 vbuf stable.
+                PRIME: begin
+                           prime_cnt<=prime_cnt+3'd1;
+                           if (prime_cnt==3'd4) begin
                                state<=RUN; compute_cnt<=0; tile_cnt<=0; trow_cnt<=0; compute_active<=1'b1;
                            end
+                       end
                 RUN: if (compute_active) begin
                         if (last_issue) begin compute_active<=1'b0; state<=DRAIN; mdrain_cnt<=0; end
                         else if (compute_cnt==5'd31) begin

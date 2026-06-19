@@ -30,7 +30,7 @@
 
 > 배치 원칙(보강): **사실/구조는 Implementation, 통찰/평가·디버깅 서사는 Discussion(§7).** 단 §2는 예외적으로 *설계 결정의 근거·대안 기각*까지 담당(명세의 "justify" 요구 직결). 오버클럭 단계별 서사는 §5에 모았고, "왜·어떻게 진단" 통찰은 §7.
 
-> Baseline(INT8 Direct, 보드 실측 완료: 200MHz 108.9ms→feed-overlap ~98ms, 10000/10000)과 Winograd(Complex F(4×4,3×3), RTL bit-exact 완료·171.42MHz timing met·보드 실측 미수행, 추정 ~79ms)는 §3/§4로 분리. 각 섹션 내부는 다시 **오버클럭 이전(기능 정확성)/이후(timing closure)**로 나눈다.
+> Baseline(INT8 Direct, 보드 실측 완료: 200MHz 108.9ms→feed-overlap ~98ms, 10000/10000)과 Winograd(Complex F(4×4,3×3), RTL bit-exact 완료·171.42MHz timing met·보드 실측 미수행, 추정 ~78ms)는 §3/§4로 분리. 각 섹션 내부는 다시 **오버클럭 이전(기능 정확성)/이후(timing closure)**로 나눈다.
 
 ### 0.2 코드 발췌 원칙
 
@@ -101,7 +101,7 @@ Input (1,28,28) → Conv1 (8,1,3,3) → ReLU → (8,26,26)
 
 본 프로젝트의 컨볼루션 엔진이 공통으로 쓰는 입력 스트리밍 원리를 정리한다. 이는 이전 과제의 Sobel edge detection IP에서 검증된 구조를 재사용한 것으로, 여기서는 원리만 설명한다(코드는 싣지 않는다).
 
-BRAM에서 픽셀을 **raster-scan(한 클럭에 한 픽셀)**으로 읽고 이를 line buffer 여러 개에 직렬로 통과시키면, 매 클럭에 **3×3 윈도우 하나**가 완성된다(3×3 커널의 경우 line buffer 2개와 9개의 윈도우 레지스터가 필요하다). 일단 윈도우가 만들어지면 그 안의 9개 탭은 윈도우 레지스터에 모두 동시 가용하다. **[그림 F6: Sobel 파이프라인의 윈도우 shift 데이터 재사용 — `figures/diagrams/sobel_pipeline_dataflow.svg`]**
+BRAM에서 픽셀을 **raster-scan(한 클럭에 한 픽셀)**으로 읽고 이를 line buffer 여러 개에 직렬로 통과시키면, 매 클럭에 **3×3 윈도우 하나**가 완성된다(3×3 커널의 경우 line buffer 2개와 9개의 윈도우 레지스터가 필요하다). 일단 윈도우가 만들어지면 그 안의 9개 탭은 윈도우 레지스터에 모두 동시 가용하다. **[그림 F6: Sobel 파이프라인의 윈도우 shift 데이터 재사용 — `docs/figures/sobel_pipeline_dataflow.svg`]**
 
 이 구조의 중요한 함의는 **한 번에 출력 한 행(OH)씩 진행한다**는 점이다. 따라서 여러 출력 행을 동시에 계산하는 **OH 방향 병렬화**는 line buffer를 갈래내거나 윈도우 레지스터를 복제하고 주소·valid 로직을 다중화해야 하므로 추가 비용이 든다. 이 비대칭은 §2.3에서 OH를 병렬 축으로 쓰지 않은 이유의 근거가 된다. 다만 이 비용은 *윈도우를 만드는* 단계에 대한 것이며, 이미 만들어진 윈도우 *내부*의 커널 축 선택과는 무관하다(그 선택 근거는 §2.3.3).
 
@@ -154,7 +154,7 @@ A = W1·2^17 + W0   (25-bit),   B = X   (18-bit)
 A·B = (W1·X)·2^17 + (W0·X)     → 下 17비트 = W0·X,  上 = W1·X
 ```
 
-DSP48E1의 포트 구성과 packing 비트 레이아웃은 다음 그림과 같다. **[그림 F7: DSP48E1 구조 — A포트(weight 25b)/B포트(activation 18b)/25×18 multiplier/P 48b]** **[그림 F8: SIMD packing 비트맵 — packing 없을 때 `[7:0]=W0, [29:8]=sign-extend` vs packing할 때 `[7:0]=W0, [16:8]=guard bits, [24:17]=W1, [29:25]=sign-extend`]** 그림 F8이 보여주듯, W0·X는 하위 17비트(guard bits 포함)에, W1·X는 그 위에 자리하여 둘이 겹치지 않는다.
+DSP48E1의 포트 구성과 packing 비트 레이아웃은 다음 그림과 같다. **[그림 F7: DSP48E1 구조 — A포트(weight 25b)/B포트(activation 18b)/25×18 multiplier/P 48b — `figures/existing/dsp48e1_structure.png`]** **[그림 F8: SIMD packing 비트맵 — packing 없을 때 `[7:0]=W0, [29:8]=sign-extend` vs packing할 때 `[7:0]=W0, [16:8]=guard bits, [24:17]=W1, [29:25]=sign-extend` — `figures/existing/simd_packing_bitmap.png`]** 그림 F8이 보여주듯, W0·X는 하위 17비트(guard bits 포함)에, W1·X는 그 위에 자리하여 둘이 겹치지 않는다.
 
 두 곱이 겹치지 않는 비트 영역에 자리하므로, 한 번의 DSP 연산에서 다음과 같이 분리 추출한다.
 
@@ -164,7 +164,7 @@ P1 = W1·X = sint16(⌊P / 2^17⌋ mod 2^16) + [P0 < 0] - 256·X·ovf
             ( ovf = [W1 = -128 ∧ W0 < 0] )
 ```
 
-이론상 `W1 = -128 ∧ W0 < 0`에서 25비트 표현이 overflow하므로 산술 보정항 `-256·X·ovf`와 carry 보정 `[P0<0]`을 두어 bit-exact를 보장한다. 다만 **본 과제의 실제 제공 가중치에는 -128이 없어** 이 보정 경로는 동작하지 않는다 — 따라서 이 보정의 가치는 실측 성능이 아니라 임의 INT8 가중치에 대한 일반성에 있으며, 자세한 위치 설정은 §7.1에 둔다.
+이론상 `W1 = -128 ∧ W0 < 0`에서 25비트 표현이 overflow하므로 산술 보정항 `-256·X·ovf`와 carry 보정 `[P0<0]`을 두어 bit-exact를 보장한다. 다만 **본 과제의 실제 제공 가중치에는 -128이 없다.** Python으로 세 레이어 weight 범위를 전수 확인한 결과 Conv1 [−127, 123], Conv2 [−127, 127], FC [−127, 118]로 **-128 개수가 모두 0**이며, "SIMD packing overflow condition does NOT occur"임을 검증했다. **[그림 F9: weight -128 부재 검증 — 레이어별 min/max·(-128 cnt)·"No Overflow" — `figures/existing/weight_no128_check.png`]** 따라서 이 보정 경로는 본 과제에서 실제로 동작하지 않으며, 그 가치는 실측 성능이 아니라 임의 INT8 가중치에 대한 일반성에 있다(자세한 위치 설정은 §7.1).
 
 여기서 한 가지 결정이 더 따라온다: **무엇을 패킹할 것인가.** Weight에는 -128이 없지만, **Conv1 출력 activation에는 -128이 있을 수 있다.** 만약 activation을 패킹한다면 -128 처리용 추가 로직이 PE마다 필요해 비용이 커진다. 따라서 weight 두 개(`W0, W1`)를 패킹하는 것이 최선이다. 그 귀결로, 한 DSP 묶음에서 나오는 두 결과가 **서로 다른 출력 채널(OC) 두 개**가 되도록 강제된다(OC 방향 packing). 이 사실은 §2.3에서 "왜 IC가 아니라 OC를 2× 방향으로 펼치는지"의 직접 근거가 된다.
 
@@ -353,7 +353,7 @@ Conv2 Winograd 엔진(`conv2_winograd_engine.v`)은 입력 (8,26,26) INT8을 6×
 
 **절단 (`wino_truncate`).** Winograd 변환의 1/16 스케일과 레이어 양자화 >>10을 결합한 `>>>14` 시프트 + saturation + ReLU로 직접 conv2와 동일한 INT8 양자화를 재현한다. **[코드 발췌 C7: `>>>14` 결합]**
 
-엔진 latency는 issue로부터 M_valid까지 +11~12 cycle, tile_out까지 +17 cycle이다. 한 이미지 처리 사이클은 **1,348 cyc**(baseline)이다. `RTL/conv2_winograd/`
+엔진 latency는 issue로부터 M_valid까지 +11~12 cycle, tile_out까지 +17 cycle이다. 한 이미지 처리 사이클은 top-module TB 측정 기준 **평균 약 1,341 cyc/img**(100장 합계 132,759 cyc)이다. `RTL/conv2_winograd/`
 
 #### 4.A.2 Conv1 2× rebalance 구현
 
@@ -377,7 +377,7 @@ Winograd의 timing closure(200 MHz 시도 → 171.42 MHz met)는 §5.2 Optimizat
 >
 > 핵심 정합성: 모든 변경은 **기능을 바꾸지 않는다**(시뮬레이션 bit-exact 재검증). "오버클럭 이전/이후"는 정확성과 무관하며, 측정 신뢰성은 §5.3(silent timing failure 교훈)로 담보.
 
-> **[작성 메모]** 아래 §5.1은 **본문 초안(평서체)**이다. 단계별 진단 명령·출력 로그·WNS·캡처를 시간 순서대로 싣는다. 캡처는 `docs/overclock/direct/timing/`에 실재하는 것만 인용(없는 단계는 사진 생략). 모든 RTL/제약 변경은 시뮬레이션 bit-exact 재검증으로 기능 불변을 확인했다.
+> **[작성 메모]** 아래 §5.1은 **본문 초안(평서체)**이다. 단계별 진단 명령·출력 로그·WNS·캡처를 시간 순서대로 싣는다. 캡처는 `docs/timing/`에 실재하는 것만 인용(없는 단계는 사진 생략). 모든 RTL/제약 변경은 시뮬레이션 bit-exact 재검증으로 기능 불변을 확인했다.
 
 ### 5.1 Baseline Track — 100 → 200MHz (완결, MET +0.011 ns)
 
@@ -436,7 +436,7 @@ assign pulse_out = sync1 ^ sync2;        // toggle edge = dst 1-cycle pulse
 
 Clocking Wizard 설정과 위상 정렬은 다음 캡처와 같다.
 
-- **[그림 P1: Clocking Wizard 블록 (`figures/existing/clk_wiz.png`)]**
+- **[그림 P1: Clocking Wizard 블록 (`docs/clk_wiz.png`)]**
 - **[그림 P2: Clocking Wizard 내부 — datapath clk_out phase 정렬 체크 (캡처 예정, 플레이스홀더)]**
 
 #### 5.1.2 MMCM 제약 — "188 MHz는 존재하지 않는다"
@@ -450,9 +450,9 @@ closure의 첫 조치로, 모든 data-path BRAM(Input / C1C2 / C2Pool / PoolFC)�
 - **[IP 스펙: BMG output register 설정 캡처 — `docs/ip_spec/` 참조]**
 
 #### 5.1.4 초기 −8.6 ns → 100→150 MHz (조합 깊이 + conv2 broadcast)
-초기 합성의 WNS는 **−8.6 ns**였다(**[그림: `figures/existing/01_pre-pipeline_wns-8.6.png`]**). 진단 결과 주범은 두 가지 조합 깊이 병목이었다: FC argmax의 17-input 9-level 비교 트리와 conv1의 9-input combiner. 이를 argmax는 **4-round tournament**로(C8), conv1 adder는 1→4 stage로 파이프라인화하였다.
+초기 합성의 WNS는 **−8.6 ns**였다(**[그림: `docs/timing/01_pre-pipeline_wns-8.6.png`]**). 진단 결과 주범은 두 가지 조합 깊이 병목이었다: FC argmax의 17-input 9-level 비교 트리와 conv1의 9-input combiner. 이를 argmax는 **4-round tournament**로(C8), conv1 adder는 1→4 stage로 파이프라인화하였다.
 
-그 다음, 300 MHz를 목표로 한 합성에서 WNS **−2.99 ns**, failing endpoint 110,302개가 나왔으며 **전부 datapath intra-clock(`clk_out3→clk_out3`)**이었다(**[그림: `figures/existing/02_300mhz_conv2-broadcast_wns-2.99.png`]**, 로그 `02_..._wns-2.99.txt`). 진단 명령은 다음과 같다.
+그 다음, 300 MHz를 목표로 한 합성에서 WNS **−2.99 ns**, failing endpoint 110,302개가 나왔으며 **전부 datapath intra-clock(`clk_out3→clk_out3`)**이었다(**[그림: `docs/timing/02_300mhz_conv2-broadcast_wns-2.99.png`]**, 로그 `02_..._wns-2.99.txt`). 진단 명령은 다음과 같다.
 
 ```tcl
 report_timing_summary                              ; # 요약 + 워스트 1개
@@ -464,15 +464,15 @@ report_high_fanout_nets -timing                    ; # high-fanout net 식별
 
 1. `max_fanout=32` (conv2_fsm `state`/`kw_cnt`, weight_loader `pe_id` 등) + `phys_opt -directive AggressiveFanoutOpt` → −2.99 → **−2.454**.
 2. weight broadcast에 +1 register(1회성 weight-load라 compute 무영향) → 진행.
-3. `PE_BC_DELAY` 파라미터로 PE 입력단(`sel`/`pe_en`/`pe_x`)에 register를 복제, broadcast가 PE 클러스터 근처 replica에서 출발하도록 단축 → **−2.187**(**[그림: `figures/existing/03_300mhz_step1b-step2_wns-2.187.png`]**, 로그 `03_..._wns-2.454`/`03_...isolation.txt`).
+3. `PE_BC_DELAY` 파라미터로 PE 입력단(`sel`/`pe_en`/`pe_x`)에 register를 복제, broadcast가 PE 클러스터 근처 replica에서 출발하도록 단축 → **−2.187**(**[그림: `docs/timing/03_300mhz_step1b-step2_wns-2.187.png`]**, 로그 `03_..._wns-2.454`/`03_...isolation.txt`).
 4. weight_loader의 주소·pe_id 계산을 6-level 중첩 곱셈에서 단조증가 accumulator로 대체(조합 깊이 6→1).
 
-300 MHz는 broadcast를 닫아도 reset·FSM 잔여 위반(−1.7~−1.94)이 die 전역에 남아 비현실적이었다. **따라서 목표를 낮춰 150 MHz에서 깨끗이 닫았고, 150 MHz 합성 빌드로 MNIST 10,000장을 보드에서 10000/10000 분류함을 확정**하였다(**[그림: `figures/existing/150_timing.png`]**).
+300 MHz는 broadcast를 닫아도 reset·FSM 잔여 위반(−1.7~−1.94)이 die 전역에 남아 비현실적이었다. **따라서 목표를 낮춰 150 MHz에서 깨끗이 닫았고, 150 MHz 합성 빌드로 MNIST 10,000장을 보드에서 10000/10000 분류함을 확정**하였다(**[그림: `docs/timing/150_timing.png`]**).
 
 #### 5.1.5 150→200 MHz — silent timing failure 진단, 그리고 reset fanout
 **문제 발생.** 150 이후 "200 MHz 빌드인데 wall-clock이 100 MHz와 동일(18.77 M cyc)"이라는 측정이 나왔다. 처음에는 이를 "오버클럭을 더 해도 latency가 안 줄어든다 = 전송(feed) bound"로 해석할 뻔했다.
 
-**원인 파악.** 그러나 그 "200 MHz 빌드"는 사실 **silently fail한 빌드**였다. §5.1.2의 스냅 때문이다: 188 MHz로 설정 → Clocking Wizard가 200 MHz로 스냅 → 실제로는 200 MHz로 돌면서 reset 경로(−1.94 ns)가 위반 → 분산 FSM·in-flight 카운터 구조가 desync되어 중간에 멈춤/오작동. Vivado는 *요청 클럭(188)* 기준으로 통과시켰으나 *실제 클럭(200)*에서는 위반이었던 것이다(**[그림: `figures/existing/04_200mhz_earlier-build_wns+0.04_silent-fail-suspect.png`]**). 즉 그 latency 비교는 깨진 빌드끼리의 비교였으므로 폐기하였다. 교훈은 셋이다: ① `report_clocks`로 실제 period ≠ 요청 period인지 확인(스냅 탐지), ② **slow(signoff) corner의 양수 WNS만 신뢰**, ③ 타이밍이 깨진 HW 측정은 성능 근거로 쓸 수 없다.
+**원인 파악.** 그러나 그 "200 MHz 빌드"는 사실 **silently fail한 빌드**였다. §5.1.2의 스냅 때문이다: 188 MHz로 설정 → Clocking Wizard가 200 MHz로 스냅 → 실제로는 200 MHz로 돌면서 reset 경로(−1.94 ns)가 위반 → 분산 FSM·in-flight 카운터 구조가 desync되어 중간에 멈춤/오작동. Vivado는 *요청 클럭(188)* 기준으로 통과시켰으나 *실제 클럭(200)*에서는 위반이었던 것이다(**[그림: `docs/timing/04_200mhz_earlier-build_wns+0.04_silent-fail-suspect.png`]**). 즉 그 latency 비교는 깨진 빌드끼리의 비교였으므로 폐기하였다. 교훈은 셋이다: ① `report_clocks`로 실제 period ≠ 요청 period인지 확인(스냅 탐지), ② **slow(signoff) corner의 양수 WNS만 신뢰**, ③ 타이밍이 깨진 HW 측정은 성능 근거로 쓸 수 없다.
 
 **해결.** 이 깨달음이 방향을 정했다 — "reset 경로(−1.94)부터 닫자". 300 MHz 합성에서 conv2 broadcast를 닫은 뒤 남은 최대 위반이 바로 **단일 reset net**이었다: `rst_sync → BUFG → (fanout 41,323) → DSP/register`, **−1.94 ns, route 85%, die 전역**. 단일 net이 datapath 전 레지스터(약 41k)로 직접 fanout되어 BUFG 글로벌 라우팅으로 die 끝까지 가는 데 너무 오래 걸렸다.
 
@@ -514,8 +514,8 @@ wire rst = rst_leaf;
 
 최종 결과는 **200 MHz timing CLOSED — WNS +0.011, TNS 0.000, WHS +0.002**다. 이는 slow(signoff) corner의 양수 WNS이므로 §5.1.5 앞부분의 −1.94 silent fail과 근본적으로 다른 정식 충족이다. 결과 사진은 다음과 같다.
 
-- **[그림: 최종 timing 요약 `figures/existing/final_timing.png` / 로그 `07_..._MET_wns+0.011.txt`]**
-- **[그림: power 리포트 `figures/existing/final_power.png`]** (수치 해석은 §6.2·§7.4)
+- **[그림: 최종 timing 요약 `docs/timing/final_timing.png` / 로그 `07_..._MET_wns+0.011.txt`]**
+- **[그림: power 리포트 `docs/timing/final_power.png`]** (수치 해석은 §6.2·§7.4)
 
 > 관통 교훈(짧게, 상세는 §7): 이 설계의 datapath 타이밍 벽은 대부분 high-fanout 제어·reset net의 route delay였고(로직 깊이가 아님), 효과적인 처방은 `max_fanout`으로 드라이버를 클러스터 근처에 복제하는 것이었다. 또한 워스트 하나를 닫으면 다음이 노출되는 "양파 까기"가 반복되었다.
 
@@ -525,7 +525,7 @@ Winograd 엔진도 §5.1과 같은 closure 레버를 적용했으나, 곱셈을 
 
 **합성 단계 — LUT overflow.** 첫 합성은 상수 ROM 기반 transform이 LUT를 78.7K까지 써(63.4K 초과) 배치 자체가 실패했다. 두 가지로 해결했다: ReLU 출력 범위 분석으로 데이터 비트폭을 줄이고(VW 16→14, MW 32→25, YW 36→28 등), baked ROM을 PS-writable BMG weight로 바꿔 LUT 부담을 BRAM으로 옮겼다. 결과 LUT 75.88%로 fit.
 
-**라우팅 단계 — 병목을 한 겹씩 벗기다.** 진행은 §5.1과 동일한 "양파 까기"였으나 병목의 성격이 달랐다(`docs/overclock/winograd/` 폴더명이 단계를 보존한다).
+**라우팅 단계 — 병목을 한 겹씩 벗기다.** 진행은 §5.1과 동일한 "양파 까기"였으나 병목의 성격이 달랐다(`vivado_reports/` 폴더명이 단계를 보존한다).
 
 - **−2.04 ns (`02_rb-broadcast`)**: row buffer write broadcast(fanout 312, route 93%)가 주범 → per-PE distributed LUTRAM으로 전환해 공유 net 제거.
 - **−1.74 ns (`03_output-transform`)**: output transform의 20-level 조합 깊이가 노출 → OT를 1-cycle에서 4-stage 파이프라인으로 분할.
@@ -538,13 +538,13 @@ Winograd 엔진도 §5.1과 같은 closure 레버를 적용했으나, 곱셈을 
 - **M carry-bisect (13+12 분할)**: M 경로는 닫혔으나(−0.094→0), +1 latency와 새 레지스터들의 배치 churn으로 **B class가 −0.088→−0.150으로 회귀**(`07_classB-reverted`)하고 Fmax가 196→187 MHz로 오히려 떨어졌다. → revert.
 - **Floorplan(pblock 압축)**: gather→central-reduce 구조가 lane 입력 4-way fan-in과 글로벌 출력 fan-out을 동시에 갖는 net-bound 구조라, pblock으로 압축하면 한쪽 net이 반드시 늘어난다. 강제 압축 시 WNS가 −1.116으로 10배 악화 → 본질적으로 floorplan 부적합.
 
-**현재 위치(정직한 결론).** 200 MHz는 한 병목을 닫으면 다른 곳이 터지는 "두더지 잡기"가 반복되어(bisect는 churn으로 Fmax 회귀, floorplan은 배치 붕괴) 끝내 닫지 못했고, **171.42 MHz로 fallback**했다. 그리고 **171.42 MHz에서는 timing이 완전히 닫혔다 — WNS +0.222 ns, TNS 0.000, 0 failing endpoint, "all user specified timing constraints are met"**(period 5.833 ns, MMCM VCO 한계가 정하는 이산 클럭). **[그림: Winograd 171.42 MHz timing summary 캡처]** 즉 171.42 MHz는 추정이 아니라 **정식 timing-met 결과**이고, 200 MHz만 미완이다.
+**현재 위치(정직한 결론).** 200 MHz는 한 병목을 닫으면 다른 곳이 터지는 "두더지 잡기"가 반복되어(bisect는 churn으로 Fmax 회귀, floorplan은 배치 붕괴) 끝내 닫지 못했고, **171.42 MHz로 fallback**했다. 그리고 **171.42 MHz에서는 timing이 완전히 닫혔다 — WNS +0.222 ns, TNS 0.000, 0 failing endpoint, "all user specified timing constraints are met"**(period 5.833 ns, MMCM VCO 한계가 정하는 이산 클럭). **[그림 F11: Winograd 171.42 MHz timing summary — `figures/existing/winograd_171.42MHz_timing.png`]** 즉 171.42 MHz는 추정이 아니라 **정식 timing-met 결과**이고, 200 MHz만 미완이다.
 
-다만 **보드 실측은 수행하지 못했다** — 보드 제출 마감 시점에 200 MHz fallback이 확정되지 않아, 최종 Winograd 비트스트림의 HW bring-up·latency 측정을 하지 못했다. 따라서 Winograd의 1만 장 latency는 **시뮬레이션 bit-exact + implementation timing(171.42 MHz met) + cycle 수**로부터 추정한다: compute-bound 가정 시 약 `1,348 cyc × 10,000 / 171.42 MHz ≈ 79 ms`(feed 오버랩 무시), 만약 200 MHz가 닫혔다면 ~67 ms였을 것이다. 이 값들은 모두 보드 실측이 아닌 추정임을 명시한다.
+다만 **보드 실측은 수행하지 못했다** — 보드 제출 마감 시점에 200 MHz fallback이 확정되지 않아, 최종 Winograd 비트스트림의 HW bring-up·latency 측정을 하지 못했다. 따라서 Winograd의 1만 장 latency는 **시뮬레이션 bit-exact + implementation timing(171.42 MHz met) + TB 측정 cycle**로부터 추정한다: compute-bound 가정 시 약 `1,341 cyc × 10,000 / 171.42 MHz ≈ 78 ms`(feed 오버랩 무시), 만약 200 MHz가 닫혔다면 ~67 ms였을 것이다. 이 값들은 모두 보드 실측이 아닌 추정임을 명시한다.
 
 ### 5.3 두 트랙 종합
 
-두 트랙 모두 timing closure에는 성공했으나 마무리가 다르다. Baseline은 **200 MHz MET(WNS +0.011 ns)이고 보드 실측까지 완료**(~98 ms)했고, Winograd는 200 MHz를 닫지 못해 **171.42 MHz MET(WNS +0.222 ns)으로 fallback했으며 보드 실측은 시간상 못 해 추정(~79 ms)**에 그친다. 두 트랙을 한 표로 대비한다. **[표 T12: Baseline vs Winograd closure — 클럭·WNS·검증수준·latency(실측/추정)]** 주목할 점은 **같은 closure 레버(`max_fanout` 복제, 파이프라인 분할, phys_opt directive)가 성격이 다른 두 설계에 모두 통했다**는 것이다 — 다만 Winograd는 gather 구조의 본질적 route 특성 때문에 baseline보다 마지막 구간을 닫기가 더 어려워, 같은 200 MHz 목표에 도달하지 못하고 한 단계 낮은 이산 클럭에서 멈췄다.
+두 트랙 모두 timing closure에는 성공했으나 마무리가 다르다. Baseline은 **200 MHz MET(WNS +0.011 ns)이고 보드 실측까지 완료**(~98 ms)했고, Winograd는 200 MHz를 닫지 못해 **171.42 MHz MET(WNS +0.222 ns)으로 fallback했으며 보드 실측은 시간상 못 해 추정(~78 ms)**에 그친다. 두 트랙을 한 표로 대비한다. **[표 T12: Baseline vs Winograd closure — 클럭·WNS·검증수준·latency(실측/추정)]** 주목할 점은 **같은 closure 레버(`max_fanout` 복제, 파이프라인 분할, phys_opt directive)가 성격이 다른 두 설계에 모두 통했다**는 것이다 — 다만 Winograd는 gather 구조의 본질적 route 특성 때문에 baseline보다 마지막 구간을 닫기가 더 어려워, 같은 200 MHz 목표에 도달하지 못하고 한 단계 낮은 이산 클럭에서 멈췄다.
 
 ---
 
@@ -554,11 +554,24 @@ Winograd 엔진도 §5.1과 같은 closure 레버를 적용했으나, 곱셈을 
 
 ### 6.1 Baseline — 오버클럭 이전: 기능 검증
 
-기능 검증의 기준은 PyTorch reference 모델(golden)이다. golden으로부터 레이어별 입력·기대출력을 hex로 생성하고, 각 레이어의 출력이 INT8 단위로 golden과 정확히 일치하는지(bit-exact) 확인한다. **[그림: 검증 파이프라인]**
+기능 검증의 기준은 PyTorch reference 모델(golden)이다. golden으로부터 레이어별 입력·기대출력을 hex로 생성하고, 각 레이어의 출력이 INT8 단위로 golden과 정확히 일치하는지(bit-exact)를 모듈별 테스트벤치와 전체 통합 테스트벤치로 확인한다. **[그림 F12: golden → hex → RTL bit-exact 검증 파이프라인]** 아래는 모듈별 검증 결과다 — 각 모듈은 PASS 로그와(해당되면) 동작 파형을 함께 싣고 핵심 동작을 한 줄로 해석한다.
 
-모듈별 단위 검증을 수행했다. 특히 PE cell은 입력 조합 전체(2²⁴)에 대한 exhaustive 검증으로 SIMD packing이 모든 INT8 경우에 bit-exact임을 증명했다(§2.2의 주장에 대한 직접 근거, -128 케이스 포함). Conv1·Conv2·MaxPool·FC·argmax·ping-pong 버퍼는 각각의 단위 테스트벤치로, 전체 파이프라인은 통합 테스트벤치로 검증했다.
+#### 6.1.1 PE cell — 2²⁴ exhaustive
+PE cell은 weight·activation 입력 조합 전체(2²⁴ ≈ 16.7M)에 대한 exhaustive 검증으로 SIMD packing이 **모든 INT8 경우에 bit-exact**(W1=−128 corner 포함)임을 증명했다. 이는 §2.2 packing 주장의 직접 근거다. **[그림 W1: pe_cell exhaustive PASS 로그]**
 
-시뮬레이션 파형으로 핵심 동작을 분석한다 — stage 간 핸드셰이크 타이밍, ping-pong bank toggle, 레이어 경계에서의 데이터 정렬 등. **[그림 W1, W2: 시뮬레이션 파형]**
+#### 6.1.2 Conv1 / Conv2 — 단위 TB (로그 + 파형)
+Conv1·Conv2 각각의 단위 테스트벤치로 레이어 출력이 golden과 bit-exact임을 확인했다. 파형으로는 line buffer → window register로 3×3 윈도우가 매 사이클 생성되는 과정과 PE 누적 타이밍을 분석한다. **[그림 W2: conv1 PASS 로그 + 윈도우/누적 파형]** **[그림 W3: conv2 PASS 로그 + K_col 3-cycle 누적 파형]**
+
+#### 6.1.3 FC / argmax — 단위 TB (로그 + 파형)
+FC는 2,304→10 누적이 golden과 일치함을, argmax는 4-round tournament가 최댓값 인덱스를 올바르게(낮은 인덱스 우선 tie-break) 내는지 확인한다. 파형으로 logit 누적 완료 → argmax 4-cycle latency를 분석한다. **[그림 W4: fc PASS 로그 + logit 누적 파형]** **[그림 W5: argmax PASS 로그 + tournament 파형]**
+
+#### 6.1.4 MaxPool — 단위 TB (로그)
+MaxPool은 동작이 단순(2×2 조합 비교)하므로 PASS 로그만 싣는다. **[그림 W6: maxpool PASS 로그]**
+
+#### 6.1.5 통합 TB & ping-pong
+전체 파이프라인 통합 테스트벤치로 MNIST 이미지에 대해 logit이 bit-exact임을 확인하고, ping-pong bank toggle과 stage 간 핸드셰이크 타이밍을 파형으로 분석한다. **[그림 W7: 통합 TB PASS 로그 + ping-pong/handshake 파형]**
+
+> 캡처 방침(부록 D.2): 각 모듈 [로그 캡처 + 파형 캡처 + 1줄 해석], 단 MaxPool은 로그만. 그림 W1~W7은 `figures/user/`.
 
 ### 6.2 Baseline — 오버클럭 이후: 보드 구현 & 실행
 
@@ -566,18 +579,18 @@ Winograd 엔진도 §5.1과 같은 closure 레버를 적용했으나, 곱셈을 
 
 **Resource utilization.** baseline은 DSP **226/240(94%)**(Conv2 192 + Conv1 18 + FC 16)을 쓴다. LUT / FF / BRAM을 포함한 전체 사용량을 표로 정리한다. **[표 T5]** *주의: DSP 226은 확인된 값이나, baseline 전용 LUT/FF/BRAM util 리포트가 별도로 없으므로 Vivado에서 baseline implementation의 util을 재생성해 정확 수치를 기입한다(부록 C TODO). 그 전까지 LUT/FF/BRAM 수치는 provisional.* **[그림: util 리포트 캡처]**
 
-**Power (명세 우선순위 #2).** `figures/existing/final_power.png` 기반으로 total / dynamic / static(W)을 표기한다. 명세 p.7의 요구대로 **power 리포트 setup을 default에서 변경하지 않고** 측정했음을 명시한다. 가능하면 150 MHz와 200 MHz 두 시점의 power를 함께 제시해 오버클럭 전후를 비교한다(트레이드오프 해석은 §7.4). **[표 T10: 클럭별 power]** *주의: 정확 수치는 png에서 확인 후 기입.*
+**Power (명세 우선순위 #2).** `docs/timing/final_power.png` 기반으로 total / dynamic / static(W)을 표기한다. 명세 p.7의 요구대로 **power 리포트 setup을 default에서 변경하지 않고** 측정했음을 명시한다. 가능하면 150 MHz와 200 MHz 두 시점의 power를 함께 제시해 오버클럭 전후를 비교한다(트레이드오프 해석은 §7.4). **[표 T10: 클럭별 power]** *주의: 정확 수치는 png에서 확인 후 기입.*
 
 **보드 실행 결과.** clean 빌드(WNS +0.011)에서 측정했으므로 수치 자체가 신뢰 가능하다.
 
 - **정확도(SW 대비)**: MNIST 10,000장에 대해 **10,000 / 10,000 일치**(100%).
 - **Latency**: 최초 200 MHz 실측 **108.9 ms**(10,896,290 cycle @ 100 MHz 타이머). 이 108.9 ms는 100 MHz baseline(0.188 s) 대비 1.72×, 150 MHz(0.128 s) 대비 1.17×이다. 이후 Vitis feed-overlap 최적화로 **약 98 ms**까지 더 단축했다(0.188 s 대비 1.92×). 즉 클럭만으로는 1.72×, feed 최적화를 더하면 1.92×다.
 - **End-to-end 진행**: 점진적 최적화에 따른 latency 변화를 표로 정리한다. 검증된 지점은 100 MHz baseline 0.188 s → 150 MHz 0.128 s → 200 MHz 108.9 ms → feed-overlap 후 약 98 ms이다. **[표 T6]** *주의: ping-pong·AXI burst 등 중간 단계의 개별 수치는 results_gallery·overclock_journey와 대조해 확정(검증 안 된 값은 표에서 제외).*
-- **프로파일**: 실측 로그상 in-CDMA(blocking) 입력 feed가 전체의 72%(7,905,500 cycle, 100 MHz 도메인)를 차지한다. 가속기 클럭을 2배로 올려도 compute slice만 압축되므로 1.72×에 그쳤다 — 즉 다음 병목이 연산이 아니라 **PS-PL feed**임을 데이터가 가리킨다(해석은 §7.6). **[그림: 보드 실측 캡처 `docs/overclock/direct/timing/08_*` / `result_04_overclock_200MHz_vitis_overlap_hw.png`]**
+- **프로파일**: 실측 로그상 in-CDMA(blocking) 입력 feed가 전체의 72%(7,905,500 cycle, 100 MHz 도메인)를 차지한다. 가속기 클럭을 2배로 올려도 compute slice만 압축되므로 1.72×에 그쳤다 — 즉 다음 병목이 연산이 아니라 **PS-PL feed**임을 데이터가 가리킨다(해석은 §7.6). **[그림: 보드 실측 캡처 `docs/timing/08_*` / `result_04_overclock_200MHz_vitis_overlap_hw.png`]**
 
 ### 6.3 Winograd — 오버클럭 이전: bit-exact 검증
 
-Winograd 데이터패스는 시뮬레이션 정수 검증을 통과했다. Winograd Conv2 engine은 100/100 bit-exact(`tb_cnn_accelerator_winograd_multi`, N=100), Conv1 2× rebalance gate는 40/40 bit-exact(`tb_cnn_accelerator_multi`)이며, 두 결과는 서로 다른 테스트벤치이므로 혼동 없이 분리해 표기한다.
+Winograd 데이터패스는 시뮬레이션 정수 검증을 통과했다. **Winograd를 적용한 top-module TB**는 logit bit-exact + bram_output readback 모두 **100/100 PASS**(`FINAL: results 100/100`, throughput 132,759 cyc total, avg 1,341 cyc/img, "PASS — logit bit-exact + bram_output readback, overlap")이다. **[그림 F10: Winograd top-module TB 결과 캡처 (100/100, avg 1,341 cyc/img)]** Conv1 2× rebalance gate는 별도로 40/40 bit-exact(`tb_cnn_accelerator_multi`)이며, 두 결과는 서로 다른 테스트벤치이므로 혼동 없이 분리해 표기한다.
 
 검증 기준은 정수 golden이다 — 하드웨어의 정수 데이터패스는 정수 reference와 정확히 0 오차로 일치한다(bit-exact). 한편 float 골든 모델 내부에서 나오는 `err < 5e-16`은 부동소수 reference 자체의 반올림 오차일 뿐 하드웨어 비교값이 아니므로, 둘을 분리해 서술한다. 전체 10,000장은 `1_complex_winograd_f(4,3).py` 정수 golden 기준 bit-exact 100%로 확인했다.
 
@@ -585,9 +598,9 @@ cycle 분석으로는 Conv2가 직접 conv 대비 줄어들고 Conv1 2× rebalan
 
 ### 6.4 Winograd — 오버클럭 이후: util & 비교
 
-합성 결과 자원 사용량은 LUT 75.88%(48,110/63,400), FF 49.07%(62,221/126,800), **DSP 98.33%(236/240)**, BRAM 41.85%(56.5/135)이다(`docs/overclock/winograd/01_synth_area_lut76/` 및 hierarchical util). DSP가 거의 포화 상태로, Winograd multiply array(184) + Conv1 2×(36) + FC(16)가 예산을 빠듯하게 채운다.
+합성 결과 자원 사용량은 LUT 75.88%(48,110/63,400), FF 49.07%(62,221/126,800), **DSP 98.33%(236/240)**, BRAM 41.85%(56.5/135)이다(`vivado_reports/01_synth_area_lut76/` 및 hierarchical util). DSP가 거의 포화 상태로, Winograd multiply array(184) + Conv1 2×(36) + FC(16)가 예산을 빠듯하게 채운다.
 
-timing은 **171.42 MHz에서 met**(WNS +0.222 ns, 0 failing endpoint)으로 닫혔다(단계별 서사는 §5.2). 다만 **보드 실측은 수행하지 못했다**(보드 제출 마감 시점에 fallback 미확정). 따라서 정확도·latency는 **시뮬레이션 검증 + implementation timing + cycle 추정**으로 보고한다: 시뮬레이션에서 bit-exact(100/100, §6.3)이므로 보드에서도 baseline과 동일한 10,000/10,000이 기대되며, latency는 `1,348 cyc × 10,000 / 171.42 MHz ≈ 79 ms`(compute-only, feed 무시)로 추정된다 — **모두 추정이며 보드 실측이 아님을 명시**한다.
+timing은 **171.42 MHz에서 met**(WNS +0.222 ns, 0 failing endpoint)으로 닫혔다(단계별 서사는 §5.2). 다만 **보드 실측은 수행하지 못했다**(보드 제출 마감 시점에 fallback 미확정). 따라서 정확도·latency는 **시뮬레이션 검증 + implementation timing + cycle 추정**으로 보고한다: 시뮬레이션에서 bit-exact(100/100, §6.3)이므로 보드에서도 baseline과 동일한 10,000/10,000이 기대되며, latency는 `1,341 cyc × 10,000 / 171.42 MHz ≈ 78 ms`(compute-only, feed 무시)로 추정된다 — **모두 추정이며 보드 실측이 아님을 명시**한다.
 
 power는 default setup으로 측정 시 baseline 대비(DSP 98% vs 94%, LUT 증가) 구성이 다르나, Winograd는 보드 측정이 없어 합성/implementation 추정 power만 제시하거나 "보드 측정 미수행"으로 정직하게 표기한다.
 
@@ -603,7 +616,7 @@ power는 default setup으로 측정 시 baseline 대비(DSP 98% vs 94%, LUT 증�
 
 SIMD packing은 본 설계에서 가장 효과가 컸던 결정이다. 한 DSP가 두 INT8 곱을 처리하므로 같은 240개 예산으로 사실상 두 배의 연산을 얻었고, 이는 Conv2를 192 DSP로 닫을 수 있게 한 직접적 전제였다.
 
-다만 -128 corner case 보정에 대해서는 솔직한 위치 설정이 필요하다. 이론상 `W1=-128 ∧ W0<0`에서 25비트 표현이 overflow하므로 산술 보정항을 설계에 포함했으나, **본 과제의 실제 제공 가중치에는 -128이 존재하지 않아 이 보정 경로는 실측에서 한 번도 활성화되지 않았다.** 따라서 이 보정을 "실측 성능 기여"로 과대평가해서는 안 된다. 그 가치는 두 가지 다른 측면에 있다. 첫째는 일반성이다 — 임의의 INT8 가중치(재학습된 다른 모델 포함)에 대해서도 bit-exact를 보장하므로, 이 PE는 본 과제에 한정되지 않는 재사용 가능한 빌딩 블록이다. 둘째는 선행연구 대비 위치다 — Xilinx WP486은 27비트 A 포트를 가진 DSP48E2 전용이고 Vestias(FPL'17)는 -128에서 손상이 발생하는데, 본 기법은 더 좁은 DSP48E1(25비트)에서 산술 보정만으로 전 케이스를 무손상 처리한다. 2²⁴ exhaustive 검증(§6.1)이 이 일반성을 뒷받침한다. 실제 데이터엔 -128이 없었음을 명시하는 것이 오히려 주장의 신뢰도를 높인다.
+다만 -128 corner case 보정에 대해서는 솔직한 위치 설정이 필요하다. 이론상 `W1=-128 ∧ W0<0`에서 25비트 표현이 overflow하므로 산술 보정항을 설계에 포함했으나, **본 과제의 실제 제공 가중치에는 -128이 존재하지 않아 이 보정 경로는 실측에서 한 번도 활성화되지 않았다**(§2.2 그림 F9의 전수 검증: 세 레이어 모두 -128 cnt=0). 따라서 이 보정을 "실측 성능 기여"로 과대평가해서는 안 된다. 그 가치는 두 가지 다른 측면에 있다. 첫째는 일반성이다 — 임의의 INT8 가중치(재학습된 다른 모델 포함)에 대해서도 bit-exact를 보장하므로, 이 PE는 본 과제에 한정되지 않는 재사용 가능한 빌딩 블록이다. 둘째는 선행연구 대비 위치다 — Xilinx WP486은 27비트 A 포트를 가진 DSP48E2 전용이고 Vestias(FPL'17)는 -128에서 손상이 발생하는데, 본 기법은 더 좁은 DSP48E1(25비트)에서 산술 보정만으로 전 케이스를 무손상 처리한다. 2²⁴ exhaustive 검증(§6.1)이 이 일반성을 뒷받침한다. 실제 데이터엔 -128이 없었음을 명시하는 것이 오히려 주장의 신뢰도를 높인다.
 
 ### 7.2 디버깅 사례 1 — AXI-Lite write hang
 
@@ -631,7 +644,7 @@ CSR read는 정상인데 첫 CSR write에서 MicroBlaze가 무한 hang하는 문
 
 ### 7.5 설계 통찰 — 병목의 이동과 분산 제어
 
-본 프로젝트를 관통하는 통찰은 **지엽적 최적화가 전역 병목을 이동시킨다**는 것이다. 직접 conv 단계에서는 Conv2(약 1,799 cyc)가 병목이고 Conv1은 1,634 cyc였다. Conv2를 Winograd로 1,348 cyc까지 줄이자 이번에는 **Conv1(1,634 cyc)이 새 병목**이 되었다 — Conv2만 빠르게 해서는 전체 throughput이 1,634에 묶인다. 그래서 Conv1을 2× rebalance해 837 cyc로 낮췄고, 그 결과 병목은 다시 Winograd-Conv2(1,348 cyc)로 돌아가 파이프라인 floor가 1,634에서 1,348로 내려갔다. 즉 두 레이어가 정확히 같아지는 것이 목표가 아니라, *더 느린 쪽을 더 빠른 쪽 아래로 끌어내려* 전역 floor를 낮추는 것이 핵심이다. 이 병목 이동을 정량적으로 정리한다. **[표 T3: 직접 / Winograd만 / +Conv1 2×, 각 단계의 Conv1·Conv2 cyc와 전역 floor]**
+본 프로젝트를 관통하는 통찰은 **지엽적 최적화가 전역 병목을 이동시킨다**는 것이다. 직접 conv 단계에서는 Conv2(약 1,799 cyc)가 병목이고 Conv1은 1,634 cyc였다. Conv2를 Winograd로 약 1,341 cyc까지 줄이자 이번에는 **Conv1(1,634 cyc)이 새 병목**이 되었다 — Conv2만 빠르게 해서는 전체 throughput이 1,634에 묶인다. 그래서 Conv1을 2× rebalance해 837 cyc로 낮췄고, 그 결과 병목은 다시 Winograd-Conv2(약 1,341 cyc)로 돌아가 파이프라인 floor가 1,634에서 약 1,341로 내려갔다. 즉 두 레이어가 정확히 같아지는 것이 목표가 아니라, *더 느린 쪽을 더 빠른 쪽 아래로 끌어내려* 전역 floor를 낮추는 것이 핵심이다. 이 병목 이동을 정량적으로 정리한다. **[표 T3: 직접 / Winograd만 / +Conv1 2×, 각 단계의 Conv1·Conv2 cyc와 전역 floor]**
 
 또 하나는 분산 FSM 제어의 이점이다. 중앙 컨트롤러 대신 각 engine이 자체 FSM과 핸드셰이크로 동기하는 구조(§3.0.3)는, 제어 신호의 거대 fanout과 그로 인한 timing 부담을 구조적으로 회피한다. §5의 timing closure에서 반복적으로 문제가 된 것이 high-fanout 제어 net이었음을 떠올리면, 애초에 중앙 컨트롤러를 피한 결정이 closure를 비교적 수월하게 만든 한 요인이었다고 평가할 수 있다.
 
@@ -639,7 +652,7 @@ CSR read는 정상인데 첫 CSR write에서 MicroBlaze가 무한 hang하는 문
 
 가장 중요한 한계는 **병목이 연산에서 데이터 전송으로 이동했다**는 점이다. 클럭을 100에서 200 MHz로 올렸지만 latency는 2배가 아니라 1.72×만 줄었다. 실측 프로파일상 전체 시간의 72%가 100 MHz 도메인의 blocking CDMA 입력 feed에 쓰이기 때문이다(§6.2). 가속기 클럭을 올려도 compute slice만 압축될 뿐 feed 시간은 그대로이므로, 설계가 compute-bound에서 memory/feed-bound로 전이한 것이다. 따라서 다음 레버는 연산이 아니라 **feed overlap**(non-blocking/prefetch CDMA + 입력 bank 2개 초과)이다. 이것이 선행되어야 Winograd의 연산 감소가 비로소 end-to-end latency로 환원된다.
 
-둘째, Winograd는 200 MHz를 닫지 못하고 171.42 MHz로 fallback했으며(§5.2), 무엇보다 **보드 실측을 수행하지 못했다** — 보드 제출 마감 시점의 시간 제약 때문이다. 따라서 Winograd의 성능은 시뮬레이션 bit-exact + 171.42 MHz timing-met + cycle 추정(~79 ms)으로만 보고되며, 보드 bring-up과 200 MHz closure(phys_opt·floorplan·carry-select)가 명확한 후속 작업이다.
+둘째, Winograd는 200 MHz를 닫지 못하고 171.42 MHz로 fallback했으며(§5.2), 무엇보다 **보드 실측을 수행하지 못했다** — 보드 제출 마감 시점의 시간 제약 때문이다. 따라서 Winograd의 성능은 시뮬레이션 bit-exact + 171.42 MHz timing-met + cycle 추정(~78 ms)으로만 보고되며, 보드 bring-up과 200 MHz closure(phys_opt·floorplan·carry-select)가 명확한 후속 작업이다.
 
 셋째, §7.1에서 보았듯 -128 보정의 가치는 실측 성능이 아니라 일반성 측면에서만 유효하다 — 다른 가중치로 재학습하는 경우에 의미를 갖는다.
 
@@ -653,7 +666,7 @@ CSR read는 정상인데 첫 CSR write에서 MicroBlaze가 무한 hang하는 문
 
 **검증 완료된 baseline.** 명세의 INT8 직접 컨볼루션을 비트-정확하게 구현하고 200 MHz로 timing closure(WNS +0.011 ns @ slow corner)하여, MNIST 10,000장에 대해 **10,000/10,000 정확도**와 **약 98 ms** latency를 보드에서 실측하였다. 이 과정에서 가장 큰 작업은 −8.6 ns에서 +0.011 ns까지 닫아간 timing closure 여정(§5)이었으며, 그 핵심 통찰은 이 칩의 타이밍 벽이 로직 깊이가 아니라 high-fanout 제어·리셋 net의 route delay에 있었고 `max_fanout` 드라이버 복제가 일관된 처방이었다는 것이다.
 
-**제안 알고리즘.** Conv2가 곱셈의 90%를 차지한다는 분석에서 출발해, (1) DSP48E1 한 개로 두 INT8 곱을 처리하는 SIMD packing, (2) 곱셈을 직접 conv 대비 3.13× 줄이면서 INT8 bit-exact를 유지하는 complex Winograd F(4×4, 3×3), (3) 그로 인해 이동한 병목을 맞추는 Conv1 2× rebalance를 도입하였다. Winograd 데이터패스는 시뮬레이션에서 bit-exact로 검증되었고 implementation은 **171.42 MHz로 timing-met**(200 MHz는 두더지 잡기식 병목 연쇄로 미달)이다. 다만 보드 제출 마감 시점의 시간 제약으로 **보드 실측은 수행하지 못해**, 1만 장 latency는 cycle 추정(~79 ms @171.42 MHz)으로만 보고한다.
+**제안 알고리즘.** Conv2가 곱셈의 90%를 차지한다는 분석에서 출발해, (1) DSP48E1 한 개로 두 INT8 곱을 처리하는 SIMD packing, (2) 곱셈을 직접 conv 대비 3.13× 줄이면서 INT8 bit-exact를 유지하는 complex Winograd F(4×4, 3×3), (3) 그로 인해 이동한 병목을 맞추는 Conv1 2× rebalance를 도입하였다. Winograd 데이터패스는 시뮬레이션에서 bit-exact로 검증되었고 implementation은 **171.42 MHz로 timing-met**(200 MHz는 두더지 잡기식 병목 연쇄로 미달)이다. 다만 보드 제출 마감 시점의 시간 제약으로 **보드 실측은 수행하지 못해**, 1만 장 latency는 cycle 추정(~78 ms @171.42 MHz)으로만 보고한다.
 
 마지막으로, 본 설계의 다음 한계는 연산이 아니라 데이터 전송에 있다. 클럭을 두 배로 올려도 latency가 1.72×만 줄어든 것은 전체 시간의 72%가 PS-PL feed에 묶여 있기 때문이며, 따라서 Winograd의 연산 이득을 온전히 얻으려면 feed overlap이 선행되어야 한다 — 이는 향후 작업의 분명한 방향이다.
 
@@ -683,21 +696,21 @@ CSR read는 정상인데 첫 CSR write에서 MicroBlaze가 무한 hang하는 문
 ## 부록 B. 그림/표 목록
 
 - F1 타겟 CNN 구조도 · F2 PS-PL 블록도 · F3 stage 핸드셰이크/핑퐁 · F4 단일 이미지 데이터 이동 경로
-- W1/W2 시뮬 파형 · 보드 실측 캡처(docs/overclock/direct/timing/08_*) · util/power 리포트 캡처
+- W1/W2 시뮬 파형 · 보드 실측 캡처(docs/timing/08_*) · util/power 리포트 캡처
 - T1 핑퐁 버퍼 · T2 CSR map · T3 병목 이동(§7.5) · T4 WNS 마일스톤(§5.1) · T5 util · T6 end-to-end latency 진행 · T7 baseline vs winograd
 - **T8 곱셈 수→비율→이상 DSP(비정수)(§2.3.2) · T9 병렬화 옵션(144 vs 192 vs …) vs DSP예산·packing·누적단순성→192(§2.3.3) · T10 클럭별 power(150/200MHz, default setup)(§6.2/§7.4)**
 - **T11 Winograd WNS 마일스톤(−2.04→−1.74→−0.41→−0.34→−0.094, M/B/D class)(§5.2) · T12 Baseline vs Winograd closure 종합(§5.3)**
-- 캡처(Winograd): `winograd_testbench_100image_result.png`(100/100 검증), `docs/overclock/winograd/03~07/*.png`(WNS 단계), `docs/overclock/winograd/01_synth_area_lut76/`(util)
+- 캡처(Winograd): `winograd_testbench_100image_result.png`(100/100 검증), `vivado_reports/03~07/*.png`(WNS 단계), `vivado_reports/01_synth_area_lut76/`(util)
 - **의사코드 블록(§2.3.1): Conv1 / Conv2 / FC 연산 정의 중첩루프 3개**
 
 ## 부록 C. 작성 시 직접 확인할 항목 (TODO)
-1. **Power 수치**: `figures/existing/final_power.png` 열어 total/dynamic/static W 정확 기입.
+1. **Power 수치**: `docs/timing/final_power.png` 열어 total/dynamic/static W 정확 기입.
 2. **Baseline util 정확 수치**: 별도 .rpt 없으면 Vivado에서 baseline implementation util 리포트 재생성.
 3. 학번/팀번호로 파일명 확정: `TAS2_T#_김도현_학번.pdf`.
 4. References 실제 문헌 확정.
 5. 파형 캡처가 부족하면 시뮬 재실행해 핵심 구간 캡처.
 6. (확정됨) 실제 가중치에 -128 없음 → §7.1에서 packing 보정을 "일반성" 가치로 서술, "실측 성능 기여"로 과대평가 금지.
-7. §5.1 단계별 서사 작성 시 docs/overclock/direct/timing/*.txt, overclock_journey, WINOGRAD_200MHZ_CLOSURE_PLAN에서 사용 명령/directive 정확 인용.
+7. §5.1 단계별 서사 작성 시 docs/timing/*.txt, overclock_journey, WINOGRAD_200MHZ_CLOSURE_PLAN에서 사용 명령/directive 정확 인용.
 8. (확정됨, RTL 대조) **Conv2 축 명명 = 언롤 K_row(KH=3) / 시퀀셜 K_col(KW=3, kcol_accumulator).** 보고서 전체에서 이 명명 고정. (`conv2_engine.v` L273/L359/L278 근거.)
 9. (확정됨) 144 = IC8×K9×SIMD2 / 192 = OC_pair8×IC8×K_row3 — 산술 명시.
 10. (확정됨) Winograd 검증 수치: Conv2 engine 100/100, Conv1_2x 40/40, golden 10000장. "40/40을 full-pipe로" 쓰지 말 것. float golden err 5e-16 ≠ HW bit-exact(0) — 분리.
@@ -711,38 +724,49 @@ CSR read는 정상인데 첫 CSR write에서 MicroBlaze가 무한 hang하는 문
 
 ## 부록 D. 자산 매니페스트 (Typst 변환 시 #figure 연결용)
 
-> 그림·캡처의 출처를 셋으로 구분: **A=이미 있음**(경로 연결만), **B=사용자 캡처 필요**, **C=플레이스홀더/미정**. Typst 작업 시 이 표대로 `#figure(image(...))`에 연결.
+> **폴더 구조**: 보고서 산출물·자산은 최상위 **`report/`**에 모음 — `report/TAS2_report_plan.md`(본 계획서), `report/report.typ`(본문, 작성 예정), `report/TAS2_T#_김도현_학번.pdf`(최종), `report/figures/{existing, user, diagrams}/`.
+> 그림 경로는 `report.typ` 기준 상대경로 **`figures/...`**로 적는다(이미 본문 갱신 완료). 원본은 `docs/`에 그대로 두고 보고서용만 `figures/existing/`에 복사.
+> 출처 3분류: **A=이미 있음**(figures/existing·diagrams) · **B=사용자 캡처**(figures/user) · **C=사용자 사진 제공 예정**.
 
-### D.1 이미 존재 (A) — 경로 연결만
+### D.1 이미 존재 (A) — `figures/existing/`·`figures/diagrams/`에 복사 완료
 
-| 그림/표 | 파일 경로 | 위치 |
-|---|---|---|
-| F6 sliding-window 데이터 재사용 | `figures/diagrams/sobel_pipeline_dataflow.svg` | §1.4 |
-| F7 DSP48E1 구조 | (업로드됨, 저장 필요) | §2.2 |
-| F8 SIMD packing 비트맵 | (업로드됨, 저장 필요) | §2.2 |
-| P1 Clocking Wizard 블록 | `figures/existing/clk_wiz.png` | §5.1.1 |
-| WNS −8.6 | `figures/existing/01_pre-pipeline_wns-8.6.png` | §5.1.4 |
-| WNS −2.99 | `figures/existing/02_300mhz_conv2-broadcast_wns-2.99.png` | §5.1.4 |
-| WNS −2.454 / −2.187 | `figures/existing/03_300mhz_step1-replication_wns-2.454.png`, `03_..._step1b-step2_wns-2.187.png` | §5.1.4 |
-| silent-fail 의심 빌드 | `figures/existing/04_200mhz_earlier-build_wns+0.04_silent-fail-suspect.png` | §5.1.5 |
-| 150MHz timing | `figures/existing/150_timing.png` | §5.1.4 |
-| 최종 200MHz timing(+0.011) | `figures/existing/final_timing.png`, `07_..._MET_wns+0.011.txt` | §5.1.5/§6.2 |
-| 최종 power | `figures/existing/final_power.png` | §6.2 |
-| baseline HW 결과 | `figures/existing/result_04_overclock_200MHz_vitis_overlap_hw.png` | §6.2 |
-| **Winograd 171.42MHz timing met(+0.222ns)** | (업로드됨, 저장 필요) | §5.2/§6.4 |
-| Winograd TB 100장 결과 | `figures/existing/winograd_testbench_100image_result.png` | §6.3 |
-| BMG output register 설정 | `docs/ip_spec/bram_*/*-portA.png, *-summary.png` | §5.1.3 |
-| Winograd util(synth) | `docs/overclock/winograd/01_synth_area_lut76/` | §6.4 |
-| Winograd WNS 단계 캡처 | `docs/overclock/winograd/03~07/*.png` | §5.2 |
+| 그림 | figures/ 경로 | 원본 위치 | 본문 |
+|---|---|---|---|
+| F6 sliding-window 재사용 | `diagrams/sobel_pipeline_dataflow.svg` | (업로드) | §1.4 |
+| F7 DSP48E1 구조 | `existing/dsp48e1_structure.png` ✓ | (업로드) | §2.2 |
+| F8 SIMD packing 비트맵 | `existing/simd_packing_bitmap.png` ✓ | (업로드) | §2.2 |
+| F9 weight -128 부재 검증 | `existing/weight_no128_check.png` ✓ | (업로드) | §2.2/§7.1 |
+| F10 Winograd top-module TB(100/100) | `existing/winograd_testbench_100image_result.png` | docs/overclock/winograd 외 | §6.3 |
+| F11 Winograd 171.42MHz timing met | `existing/winograd_171.42MHz_timing.png` | docs/overclock/winograd/ | §5.2/§6.4 |
+| P1 Clocking Wizard 블록 | `existing/clk_wiz.png` | docs/clk_wiz.png | §5.1.1 |
+| WNS −8.6 | `existing/01_pre-pipeline_wns-8.6.png` | docs/overclock/direct/timing/ | §5.1.4 |
+| WNS −2.99 | `existing/02_300mhz_conv2-broadcast_wns-2.99.png` | 〃 | §5.1.4 |
+| WNS −2.454 / −2.187 | `existing/03_300mhz_step1-replication_wns-2.454.png`, `..._step1b-step2_wns-2.187.png` | 〃 | §5.1.4 |
+| silent-fail 의심 빌드 | `existing/04_200mhz_earlier-build_wns+0.04_silent-fail-suspect.png` | 〃 | §5.1.5 |
+| 150MHz timing | `existing/150_timing.png` | 〃 | §5.1.4 |
+| 최종 200MHz timing(+0.011) | `existing/final_timing.png` (+로그 `07_..._MET_wns+0.011.txt`) | 〃 | §5.1.5/§6.2 |
+| 최종 power | `existing/final_power.png` | 〃 | §6.2 |
+| baseline HW 결과 | `existing/result_04_overclock_200MHz_vitis_overlap_hw.png` | docs/overclock/direct/ | §6.2 |
+| Winograd util(synth) | `existing/winograd_utilization.png` | docs/ | §6.4 |
+| BMG output register 설정 | (docs/ip_spec/bram_*/*-portA.png 직접 참조 or 복사) | docs/ip_spec/ | §5.1.3 |
+| Winograd WNS 단계 캡처 | (docs/overclock/winograd/02~10/ 직접 참조) | docs/overclock/winograd/ | §5.2 |
 
-### D.2 사용자 캡처 필요 (B)
+> ※ figures/existing 복사 완료(총 16장): F7·F8·F9·F10·F11·P1·WNS 01~04·150·final_timing·final_power·baseline HW·winograd util. 인라인 업로드 3장(F7/F8/F9)도 저장·rename 완료.
 
-- **모듈별 TB 결과** — 핵심만 선별, 각 모듈 **로그 캡처 + 파형 캡처 + 간단 해석**. 단 maxpool 등 단순 레이어는 **로그 캡처만**. 대상: pe_cell(2²⁴ exhaustive PASS), conv1, conv2, fc, argmax(로그+파형), maxpool(로그만), 전체 통합 TB(10000장 bit-exact). → §6.1 (W1/W2/검증 파이프라인 자리)
+### D.2 사용자 캡처 필요 (B) → `figures/user/`
+
+- **모듈별 TB 결과(§6.1.1~6.1.5)** — 각 모듈 **로그 + 파형 + 1줄 해석**, maxpool은 로그만. 파일은 `figures/user/`에 그림 번호대로:
+  - W1 pe_cell exhaustive PASS 로그 (§6.1.1)
+  - W2 conv1 PASS 로그 + 윈도우/누적 파형 · W3 conv2 PASS 로그 + K_col 누적 파형 (§6.1.2)
+  - W4 fc PASS 로그 + logit 누적 파형 · W5 argmax PASS 로그 + tournament 파형 (§6.1.3)
+  - W6 maxpool PASS 로그(로그만) (§6.1.4)
+  - W7 통합 TB PASS 로그 + ping-pong/handshake 파형 (§6.1.5)
+  - F12 검증 파이프라인 다이어그램(golden→hex→RTL) — 필요 시 사용자 제작 or 간단 도식
 - **P2 Clocking Wizard phase 정렬 체크** 캡처 → §5.1.1
 - **baseline 전용 util 리포트**(LUT/FF/BRAM) 재생성 → §6.2 T5 (현재 provisional)
 - **power 정확 수치** final_power.png에서 판독 → §6.2 T10
 
-### D.3 플레이스홀더 / 작성 시 제작 (C)
+### D.3 사용자 사진 제공 예정 (C) → `figures/diagrams/`
 
-- F1 타겟 CNN 구조도, F2 PS-PL 블록도, F3 핸드셰이크/핑퐁+FSM, F4 단일 이미지 데이터 이동, F5 Winograd 보간점 격자 → **사용자가 사진 제공 예정**(제가 SVG 미작성).
+- F1 타겟 CNN 구조도, F2 PS-PL 블록도, F3 핸드셰이크/핑퐁+FSM, F4 단일 이미지 데이터 이동, F5 Winograd 보간점 격자 → **사용자가 사진/SVG 제공 예정**(제가 작성 안 함).
 - §2.7 G·Bᵀ·Aᵀ 행렬 실제 값(46 곱 분해 근거).

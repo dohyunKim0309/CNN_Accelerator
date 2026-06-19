@@ -1,0 +1,62 @@
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="black"/>
+    </marker>
+  </defs>
+
+  <text x="400" y="34" text-anchor="middle" font-size="20" font-weight="bold">Bit-exact Verification Pipeline</text>
+
+  <!-- PyTorch reference -->
+  <rect x="80" y="80" width="220" height="70" rx="12" fill="#eef" stroke="black" stroke-width="2"/>
+  <text x="190" y="110" text-anchor="middle" font-size="14" font-weight="bold">PyTorch reference model</text>
+  <text x="190" y="130" text-anchor="middle" font-size="12" fill="#555">(golden)</text>
+
+  <!-- generates -> hex -->
+  <line x1="300" y1="115" x2="358" y2="115" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="329" y="105" text-anchor="middle" font-size="11">generates</text>
+
+  <!-- layer-wise hex -->
+  <rect x="360" y="80" width="240" height="70" rx="12" fill="#fffbe6" stroke="black" stroke-width="2"/>
+  <text x="480" y="108" text-anchor="middle" font-size="13" font-weight="bold">Layer-wise hex</text>
+  <text x="480" y="128" text-anchor="middle" font-size="11" fill="#555">input + expected output</text>
+
+  <!-- down arrow to RTL sim -->
+  <line x1="480" y1="150" x2="480" y2="208" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="495" y="183" text-anchor="start" font-size="11">fed into</text>
+
+  <!-- Verilog RTL sim -->
+  <rect x="360" y="210" width="240" height="70" rx="12" fill="white" stroke="black" stroke-width="2"/>
+  <text x="480" y="238" text-anchor="middle" font-size="13" font-weight="bold">Verilog RTL simulation</text>
+  <text x="480" y="258" text-anchor="middle" font-size="11" fill="#555">(testbench)</text>
+
+  <!-- expected output goes to compare (from hex, left side) -->
+  <path d="M360,115 C220,115 200,210 290,250" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="210" y="180" text-anchor="middle" font-size="11">expected</text>
+
+  <!-- RTL sim output to compare -->
+  <line x1="360" y1="250" x2="282" y2="250" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="320" y="240" text-anchor="middle" font-size="11">actual</text>
+
+  <!-- Compare / diff node (diamond) -->
+  <polygon points="180,250 245,215 310,250 245,285" fill="#fdeede" stroke="black" stroke-width="2"/>
+  <text x="245" y="245" text-anchor="middle" font-size="12" font-weight="bold">compare</text>
+  <text x="245" y="262" text-anchor="middle" font-size="10">(diff)</text>
+
+  <!-- down to bit-exact decision -->
+  <line x1="245" y1="285" x2="245" y2="335" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- decision -->
+  <rect x="120" y="340" width="250" height="65" rx="12" fill="white" stroke="black" stroke-width="2"/>
+  <text x="245" y="368" text-anchor="middle" font-size="13" font-weight="bold">bit-exact match?</text>
+  <text x="245" y="388" text-anchor="middle" font-size="11" fill="#555">INT8, per-layer</text>
+
+  <!-- arrow to PASS -->
+  <line x1="370" y1="372" x2="448" y2="372" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="409" y="362" text-anchor="middle" font-size="11">yes</text>
+
+  <!-- PASS result -->
+  <rect x="450" y="340" width="230" height="65" rx="12" fill="#cdeccd" stroke="#1a7a1a" stroke-width="2.5"/>
+  <text x="565" y="370" text-anchor="middle" font-size="15" font-weight="bold" fill="#0f5f0f">PASS</text>
+  <text x="565" y="392" text-anchor="middle" font-size="12" fill="#0f5f0f">= bit-exact</text>
+</svg>

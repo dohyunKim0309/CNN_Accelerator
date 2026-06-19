@@ -1,6 +1,6 @@
 # Timing Evidence — Overclock 100→200MHz (단계별 근거)
 
-각 파일은 **"왜 그 부분을 레지스터로 타이밍을 쪼갰는가(register-split)"의 근거**만 남긴 trim 본 (원본 Vivado 5000줄 덤프는 제거, WNS 요약 + 워스트 path 의 Source→Dest + logic/route 비율만 보존). 서사 전체는 `docs/overclock_journey_100_to_200mhz.md`.
+각 파일은 **"왜 그 부분을 레지스터로 타이밍을 쪼갰는가(register-split)"의 근거**만 남긴 trim 본 (원본 Vivado 5000줄 덤프는 제거, WNS 요약 + 워스트 path 의 Source→Dest + logic/route 비율만 보존). 서사 전체는 `docs/overclock/direct/journey.md`.
 
 파일명 형식: `<stage>_<freq>_<무엇>_<wns>.{txt=리포트발췌, png=Vivado 요약}`
 

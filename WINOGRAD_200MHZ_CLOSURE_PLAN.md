@@ -26,7 +26,7 @@
 | 그 신호의 fanout 구조 | fanout 큰 net **하나** → `max_fanout` 복제로 해결 가능 | **fanout 1~2 짜리 net 수천 개** → 복제가 원리적으로 무효 |
 | 데이터 위치 | weight-stationary + 누적 PE-local (데이터는 제자리, 제어만 이동) | transform 중앙집중 → 모든 데이터가 매 cycle 중앙↔184 DSP 왕복 |
 
-baseline 의 모든 타이밍 벽(`overclock_journey_100_to_200mhz.md`)은 **"동일값 고fanout broadcast
+baseline 의 모든 타이밍 벽(`docs/overclock/direct/journey.md`)은 **"동일값 고fanout broadcast
 의 route delay"** 였고, 전부 `max_fanout` driver 복제 + reset 트리 + phys_opt 로 닫혔다.
 
 Winograd 의 실패 경로는 다르다 (`winograd_overclock_journey.md` Iter 2~3 측정):
@@ -208,6 +208,6 @@ FF 69K(해소됨ok), control set 2006. **이제 벽은 FF 가 아니라 LUT.**
 
 ---
 
-*근거 문서: `docs/overclock_journey_100_to_200mhz.md`(baseline 이 닫힌 방법),
+*근거 문서: `docs/overclock/direct/journey.md`(baseline 이 닫힌 방법),
 `docs/winograd/winograd_overclock_journey.md`(Iter 0~4), `docs/winograd/conv2_winograd_timing_review.md`(정적 카탈로그),
 `docs/winograd/conv2_winograd_aflat_locality.md`(레버 2a 초안 — 본 계획 §2.1A 가 이를 흡수·강화).*

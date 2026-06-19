@@ -14,7 +14,7 @@ Pending slots are listed so that new hardware captures can be added without chan
 
 | Stage | Milestone | Screenshot | Evidence / Notes |
 |---|---|---|---|
-| 01 | Base direct CNN, 100MHz | Pending: `result_01_base_100MHz_hw.png` | Text evidence: `docs/overclock_journey_100_to_200mhz.md` records 100MHz baseline as 0.188s, 10000/10000. |
+| 01 | Base direct CNN, 100MHz | Pending: `result_01_base_100MHz_hw.png` | Text evidence: `docs/overclock/direct/journey.md` records 100MHz baseline as 0.188s, 10000/10000. |
 | 02 | DMA / CDMA input feed | `ip_spec/AXI_CDMA.png` | Architecture capture for AXI CDMA integration. Result capture slot: `result_02_dma_hw.png`. |
 | 03 | Overclock 150MHz | `result_03_overclock_150MHz_hw.png` | Hardware result screenshot. |
 | 04 | Overclock 200MHz + Vitis feed overlap | `result_04_overclock_200MHz_vitis_overlap_hw.png` | Current direct baseline result: about 98ms for 10000 images. |

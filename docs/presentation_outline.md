@@ -82,8 +82,8 @@
 
 # 3. Additional (1) — Overclock (100 → 200 MHz)  〔담당: 김도현〕
 
-> 근거 문서: `docs/overclock_journey_100_to_200mhz.md`(서사·디버깅 로그), `docs/overclock_300mhz.md`(기술 레퍼런스),
-> `docs/timing/`(WNS 캡처), 실측: `docs/150MHz_result.png`·`docs/200MHz_result_vitis_optimize.png`.
+> 근거 문서: `docs/overclock/direct/journey.md`(서사·디버깅 로그), `docs/overclock/direct/design.md`(기술 레퍼런스),
+> `docs/overclock/direct/timing/`(WNS 캡처), 실측: `docs/150MHz_result.png`·`docs/200MHz_result_vitis_optimize.png`.
 
 ### ① 한 줄 메시지
 > "같은 RTL을 **더 빠른 클럭**에서 돌리면 firmware 한 줄 안 고치고 latency가 준다. 그런데 이 칩의 타이밍 벽은 **로직 깊이가 아니라, die 전역으로 퍼지는 high-fanout 제어/리셋 net의 route delay**였다. 해법은 로직 재설계가 아니라 **`max_fanout`으로 driver를 클러스터 근처에 복제**하는 것 — 한 줄짜리 처방. 100 → **200 MHz**, 187 → **108.9 ms**(+ Vitis feed-overlap **98 ms**)."
@@ -145,7 +145,7 @@
 ---
 #### Ⅲ. 150 MHz까지 — 300 시도 → 후퇴 → 150 closure (시간순)
 
-> **시간순 사실**: 처음엔 300을 노렸다. 300이 안 닫혀서 **일단 안전한 150으로 후퇴**한 게 이 블록 — **300 포기 판단도 여기서 났다.** 각 단계의 "무엇이 임계였나" 근거 로그는 `docs/timing/`(옵시디언 링크).
+> **시간순 사실**: 처음엔 300을 노렸다. 300이 안 닫혀서 **일단 안전한 150으로 후퇴**한 게 이 블록 — **300 포기 판단도 여기서 났다.** 각 단계의 "무엇이 임계였나" 근거 로그는 `docs/overclock/direct/timing/`(옵시디언 링크).
 
 **(a) (착수 전) FC argmax + conv1 adder — 100 MHz에서도 −8.6 ns**  → 근거: [[01_pre-pipeline_wns-8.6.png]]
 - 10-class argmax 1-cycle 조합(24-bit 비교기 **9단 직렬**) + conv1 9입력 가산이 1-cycle → **setup −8.6 ns @100 MHz** (클럭 올리기는커녕 100도 위험).
@@ -212,7 +212,7 @@
 - reset/shift_en **`max_fanout` 한 줄** 코드 스니펫.
 - argmax **9단 직렬 → 4-round 토너먼트** 그림.
 - 실측 캡처: `150MHz_result.png`(128 ms), `200MHz_result_vitis_optimize.png`(98 ms).
-- **단계별 근거 로그(옵시디언)**: [[docs/timing/README]] 표 + 각 단계 — [[01_pre-pipeline_wns-8.6.png]] · [[02_300mhz_conv2-broadcast_wns-2.99.txt]] · [[03_300mhz_step1-replication_wns-2.454.png]] · [[03_300mhz_step1b-step2_wns-2.187.png]] · [[05_200mhz_reset-tree_wns-0.154.txt]] · [[06_200mhz_physopt-plateau_wns-0.102_lb2-CE.txt]] · [[07_200mhz_MET_wns+0.011.txt]] · [[08_200mhz_HW-result_10000of10000_108.9ms.txt]]. (참고 — silent-fail 의심 빌드: [[04_200mhz_earlier-build_wns+0.04_silent-fail-suspect.png]].)
+- **단계별 근거 로그(옵시디언)**: [[docs/overclock/direct/timing/README]] 표 + 각 단계 — [[01_pre-pipeline_wns-8.6.png]] · [[02_300mhz_conv2-broadcast_wns-2.99.txt]] · [[03_300mhz_step1-replication_wns-2.454.png]] · [[03_300mhz_step1b-step2_wns-2.187.png]] · [[05_200mhz_reset-tree_wns-0.154.txt]] · [[06_200mhz_physopt-plateau_wns-0.102_lb2-CE.txt]] · [[07_200mhz_MET_wns+0.011.txt]] · [[08_200mhz_HW-result_10000of10000_108.9ms.txt]]. (참고 — silent-fail 의심 빌드: [[04_200mhz_earlier-build_wns+0.04_silent-fail-suspect.png]].)
 
 ### ④ 슬라이드 (가볍게 — 5장 + 백업)
 - **S1**: "클럭만 올리면 firmware 무변경으로 빨라진다" + `187 → 108.9 → 98 ms` 화살표.
@@ -357,7 +357,7 @@
 
 ### 출처 (이 개요의 근거 문서)
 - `README.md` (마일스톤·아키텍처) / `docs/project_overview.md` (역할 분담·DSP 분배)
-- `docs/overclock_journey_100_to_200mhz.md`, `docs/overclock_300mhz.md`, `docs/timing/`
+- `docs/overclock/direct/journey.md`, `docs/overclock/direct/design.md`, `docs/overclock/direct/timing/`
 - `docs/DSP48E1_signed8x8_SIMD_Packing.md`
 - `docs/winograd/algorithm_complex_f43.md`, `docs/winograd/README.md`, `docs/winograd/conv2_winograd_design.md`
 - `RTL/fc/fc_argmax.v` (4-round 토너먼트), `RTL/cnn_accelerator.v` (reset 복제 트리)

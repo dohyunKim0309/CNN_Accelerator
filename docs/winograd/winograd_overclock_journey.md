@@ -141,7 +141,7 @@
 
 ## Iteration 8 — 2차 routed: WNS −1.735 → 변환 파이프 심화 (2026-06-12)
 - **2차 route** (rb LUTRAM 반영, phys_opt 無): WNS **−1.735** / ~27K EP (−2.037 에서 개선,
-  rb 부류 top-30 소멸 = Iter 7 적중). 30 worst 분포 (`vivado_reports/03_*`):
+  rb 부류 top-30 소멸 = Iter 7 적중). 30 worst 분포 (`docs/overclock/winograd/03_*`):
   **29/30 = 출력변환** (m_flat→y 27 + y→y16 2, logic 10-12단 = CARRY4 6-8 직렬 ~3.3ns
   + route ~3.2ns), 1/30 = IT stage2→a_q (−1.4).
 - **해결 (생성기 갱신 — 단일 진실원 유지, `winograd_gen.py` emitter 수정 후 재생성)**:
@@ -151,7 +151,7 @@
   3. engine/array 정렬: B-port +4 (w_q_op4/mul_*_q4), m_valid = issue+**10**, tag **14단**.
   - 부분합 폭 = 전체 삼각부등식 상한 이하라 동일 폭 안전. 전부 reset/CE-free.
 - **검증**: standalone **100/100 (1347 cyc/img, +3)** + full **100/100** + 2clk CDC **10/10**.
-  (raw 리포트 폴더 = `vivado_reports/NN_<단계>_<핵심결과>/` 로 개명, README 색인 추가.)
+  (raw 리포트 폴더 = `docs/overclock/winograd/NN_<단계>_<핵심결과>/` 로 개명, README 색인 추가.)
 
 ## Iteration 9 — 지층 일괄 처리 (2026-06-12, `wino_strata.tcl` 분석 기반)
 - **신규 진단 도구**: `wino_strata.tcl` (routed design 에서 source) — 실패 endpoint 전체를
@@ -183,7 +183,7 @@
 - **3차 route**: WNS **−1.735 → −0.417** (Iter 8+9 의 3개 지층 일괄 제거 적중,
   failing 7,195 / TNS −596 = 평균 −0.083 의 잔불). phys_opt AggressiveExplore "did not
   improve" — 복제/재배치로 안 줄어드는 worst 라는 신호.
-- **진단** (`vivado_reports/04_route_wns-0.41_wm-equiv-merge/`): worst 30 이 전부 한 클래스 —
+- **진단** (`docs/overclock/winograd/04_route_wns-0.41_wm-equiv-merge/`): worst 30 이 전부 한 클래스 —
   **`lane[0].u_mul/wm_we_q → lane[1..3] RAM/WE`** (route 85%, logic 2단).
   Iter 9 의 lane별 wm_*_q 재타이밍이 **4 lane 등가 register 라 합성이 1벌로 merge** →
   die-spanning write 버스가 +1 cycle 어긋난 채 부활. 병합된 wm_addr_q net **fanout 2,944**
@@ -200,7 +200,7 @@
 ## Iteration 11 — 4차 routed: WNS −0.341 / **40 EP** → 막판 3클래스 (2026-06-12)
 - **4차 route**: keep 수정 적중 — failing **7,195 → 40 EP**, TNS −596 → **−4.585**.
   (baseline 의 −0.154/44 EP 국면과 동형.) phys_opt AggressiveExplore 무반응 지속.
-- **40 EP 분류** (`vivado_reports/05_*/wino_paths40.rpt`) + 처방 (전부 zero-latency):
+- **40 EP 분류** (`docs/overclock/winograd/05_*/wino_paths40.rpt`) + 처방 (전부 zero-latency):
   | slack | 클래스 (EP) | 처방 |
   |---|---|---|
   | −0.34~−0.23 | IT stage2b **c+d assembly** → a_q (9) — [vre최종+vim최종+합] 3-chain 직렬 | 생성기: cmul 슬롯 c+d 를 stage2a **전용 부분합**으로 (c+d = Σ tre·(RE+IM)+tim·(RE−IM), Bᵀ 단성분이라 계수 {0,±1,±4} 유지) → 2b 가 자기 partial 의 balanced 합 |
@@ -213,7 +213,7 @@
 - **5차 route** (Iter 11 처방 일괄 반영 후): WNS **−0.341 → −0.094**, failing **40 → 7 EP**.
   (스크린샷 −0.146/13 은 그 직전 route; 재route 로 −0.094 까지 좁혀짐.)
   ★ phys_opt AggressiveExplore **여전히 무반응** — 남은 3클래스가 phys_opt 영역 밖임을 확정.
-- **7 EP 분류** (`vivado_reports/06_route_wns-0.094_MBD-baseline/` : strata/paths/da — ★현재 baseline):
+- **7 EP 분류** (`docs/overclock/winograd/06_route_wns-0.094_MBD-baseline/` : strata/paths/da — ★현재 baseline):
   | slack | 클래스 (EP) | 성질 | 처방 |
   |---|---|---|---|
   | **−0.094** | `gpim_q`→`m_im_flat` (M 켤레조립 허수, 3) | 25-bit `-(acc+gp)` **단일 carry chain**(7×CARRY4), logic 58% | carry chain 컬럼고정 → phys_opt 불가. carry-select(no-lat) 또는 negate-fold(OT 흡수) 또는 bisect(+1) — **B 재route 후 잔류 시** |
@@ -243,7 +243,7 @@
 ## Iteration 13 — 5차 routed (class B): WNS −0.150 → **class B regression 확정·revert** (2026-06-16)
 - **5차 route** (class B v2 적용본): WNS **−0.094 → −0.150**, failing **7 → 23 EP**, TNS −0.85 → **−1.044**.
   → **class B 는 닫은 게 아니라 악화** (3 지표 전부 후퇴).
-- **23 EP 분류** (`vivado_reports/07_route_wns-0.150_classB-reverted/`):
+- **23 EP 분류** (`docs/overclock/winograd/07_route_wns-0.150_classB-reverted/`):
   | slack | 클래스 (EP) | 성질 |
   |---|---|---|
   | **−0.150** | `grp_q_ic·tile6_q_ic`→`gic[*].u_it/tre` (IT stage1, 22) | **route 60~70%**, logic 5~6단(CARRY4 2+LUT) |
@@ -280,7 +280,7 @@
 
 ## Iteration 15 — Vivado 결산: bisect 순손해 → floorplan 사망(밀도 벽) → **171.43MHz 확정** (2026-06-17~19)
 
-**(a) bisect HW 첫 합성 = 순손해 → revert.** Iter 14 bisect 를 Vivado 합성: M(`m_im_flat`)은 **닫혔으나**(실패목록서 사라짐), +1 lat + 신규 레지(siml/simh/accH/gpH/car ×10)가 **unpinned 배치를 churn** → WNS **−0.342**(`gic.u_it/tre` B벽 99EP) + 신규 **−0.302**(`wm_we_q→wmem_op/WE` 가중치램 write, route 85%) + gpre/tile6. **Fmax 187 < baseline 196** = 순손해. → baseline 복원(`/tmp/ORIG` 526줄, bisect=`conv2_winograd_engine.bisect.bak` 572줄 보존), iverilog standalone+full **100/100, 1348 cyc/img** 재확인. (리포트 `vivado_reports/new/`.)
+**(a) bisect HW 첫 합성 = 순손해 → revert.** Iter 14 bisect 를 Vivado 합성: M(`m_im_flat`)은 **닫혔으나**(실패목록서 사라짐), +1 lat + 신규 레지(siml/simh/accH/gpH/car ×10)가 **unpinned 배치를 churn** → WNS **−0.342**(`gic.u_it/tre` B벽 99EP) + 신규 **−0.302**(`wm_we_q→wmem_op/WE` 가중치램 write, route 85%) + gpre/tile6. **Fmax 187 < baseline 196** = 순손해. → baseline 복원(`/tmp/ORIG` 526줄, bisect=`conv2_winograd_engine.bisect.bak` 572줄 보존), iverilog standalone+full **100/100, 1348 cyc/img** 재확인. (리포트 `docs/overclock/winograd/08_route_wns-0.342_bisect-churn/`.)
 
 **(b) floorplan-only on baseline = 밀도 벽으로 사망.** geography(`new_new/`): conv2 가 칩 전폭(SLICE X0-89, Y12-199, **~49K 셀=칩 절반**) 산개. reduce(m_im_flat)조차 X13-81. `pb_reduce`(reduce 만 ~5.5K 셀) → CR 압축 3회 시도 전부 실패:
   - **1 CR(X1Y2)**: place 실패 — X1Y2 가 이미 DSP열+lane 으로 LUT 88% → reduce 추가 시 **slice 158% overflow**.
@@ -347,7 +347,7 @@ throughput = issue rate(1 issue/cyc, FSM 고정) → **파이프 깊이↑ 해�
 
 ## §B. 남은 벽 = high-fanout net (★ baseline 교훈으로 재구성)
 
-★ `docs/overclock_journey_100_to_200mhz.md` 의 결정적 교훈: **이 칩(100T)의 datapath net 벽은
+★ `docs/overclock/direct/journey.md` 의 결정적 교훈: **이 칩(100T)의 datapath net 벽은
 거의 전부 "die 전역 high-fanout 제어/리셋 net 의 route delay"이고, 해법은 floorplan 이 아니라
 `max_fanout` driver 복제**다. baseline 은 **DSP 94%에서 floorplan 없이** 200MHz 를 닫았다
 (state/kw_cnt/shift_en/reset max_fanout + phys_opt). → winograd 의 net 60%+ 도 "congestion

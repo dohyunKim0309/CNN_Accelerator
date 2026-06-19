@@ -1,6 +1,6 @@
 # conv2 Winograd 200MHz — M·B 두 벽 동시 닫기 설계 (코드 전 설계서)
 
-> 대상 = `vivado_reports/06_route_wns-0.094_MBD-baseline` (현재 RTL=revert 후 이 상태).
+> 대상 = `docs/overclock/winograd/06_route_wns-0.094_MBD-baseline` (현재 RTL=revert 후 이 상태).
 > 원칙: **벽 성질에 레버 매칭** + **이전 실패 모드를 구조적으로 회피**.
 > 검증 gate = standalone `tb_conv2_winograd_engine_multi` → full `tb_cnn_accelerator_winograd_multi`.
 > 관련: `conv2_winograd_engine_arch.md`(anchor §2.1, 안전수정 §5), `timing_review.md`(레버 프레임 §2/§6).

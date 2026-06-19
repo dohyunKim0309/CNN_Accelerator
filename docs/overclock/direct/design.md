@@ -291,7 +291,7 @@ write_bitstream 은 완료됐으나 **timing FAIL**: **WNS −2.99ns, TNS −153
 | clk_out1 → clk_out1 (100 도메인) | −0.043 | 8 | ram_interconnect 512b up/downsizer, 별개·미세 |
 
 ### 11.2 진단 — 병목은 compute 아닌 conv2 broadcast (route 지배)
-워스트 경로(`report_design_analysis` / `report_timing`, 저장: `docs/timing/overclock_timing_violation_except_conv2weight.txt`):
+워스트 경로(`report_design_analysis` / `report_timing`, 저장: `docs/overclock/direct/timing/overclock_timing_violation_except_conv2weight.txt`):
 - `conv2/wl_inst/pe_id` → (LUT decode) → PE `w_regs_reg/CE`. **Path 6.10ns = logic 0.83(14%) + route 5.28(86%)**, Logic Levels 3, **DSP None**.
 - = **weight-load enable broadcast** (MAC 아님). `pe_cell` 확인: `w_regs CE=load_en`(1회성 적재 전용), compute는 `w_regs[sel]→DSP` 풀파이프(AREG/BREG/MREG/PREG)로 **분리**.
 - ★ **weight-load 제외**(`set_false_path -to *w_regs_reg*`) 후 재측정 → **여전히 WNS −2.72, 67206 failing**. 새 워스트 `conv2/fsm_inst/state → DSP`, 또 route 86%.

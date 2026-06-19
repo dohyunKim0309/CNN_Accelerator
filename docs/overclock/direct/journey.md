@@ -1,7 +1,7 @@
 # Overclock Journey — 100 → 150 → 200 MHz (CNN Accelerator, Arty A7-100T)
 
 > 가속기 datapath 클럭을 100MHz baseline 에서 200MHz 로 끌어올린 전 과정의 **서사적 기록** — 무엇이 병목이었고, 어떤 가설을 세웠다 버렸고, 각 장벽을 어떻게 닫았는지.
-> 깊은 스펙/수치는 `docs/overclock_300mhz.md`(기술 레퍼런스), 모듈 타이밍은 `RTL/conv2/conv2_timing.md` 등. 이 문서는 **사고 과정 + 디버깅 로그** 중심.
+> 깊은 스펙/수치는 `docs/overclock/direct/design.md`(기술 레퍼런스), 모듈 타이밍은 `RTL/conv2/conv2_timing.md` 등. 이 문서는 **사고 과정 + 디버깅 로그** 중심.
 > 작성: 2026-06-04.
 
 ---
@@ -182,4 +182,4 @@ wire rst = rst_leaf;
 - **왜 2×가 아니라 1.72× 인가**: profile in-CDMA(blocking) **72%**(7.9M cyc) — CDMA 입력 feed 가 100MHz 도메인(가속기 클럭 무관)이라, 가속기 2×는 compute slice 만 압축. **현재 floor = CDMA feed.**
 - **다음 레버 (latency)**: ① **CDMA feed overlap** — non-blocking/prefetch CDMA + 입력 bank>2 로 feed 를 compute 와 겹치면 ~0.08s 근처(이론). ② **복소수 Winograd F(4,3)** (conv2 곱셈 144→46, 3.13×) — golden 작성·10000장 bit-exact 완료, RTL 미착수 ([[winograd-f43-golden]]); feed 를 먼저 푼 뒤 compute-bound 가 되면 효과.
 
-*관련 문서: `docs/overclock_300mhz.md`(기술 스펙·결정 기록), `RTL/conv2/conv2_timing.md`, memory `overclock-300mhz-kickoff`.*
+*관련 문서: `docs/overclock/direct/design.md`(기술 스펙·결정 기록), `RTL/conv2/conv2_timing.md`, memory `overclock-300mhz-kickoff`.*

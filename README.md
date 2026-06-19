@@ -226,7 +226,7 @@ Phase 1 이후 모든 CNN 가속기 RTL 이 모이는 메인 디렉토리. 위 B
 
 - `project_overview.md` — 보드/자원 한도, 타겟 CNN, 결정 사항, 업무 분담 결정 내역
 - `DSP48E1_signed8x8_SIMD_Packing.md` — DSP48E1 단일 multiplier 로 signed 8×8 두 개를 동시에 수행하는 SIMD packing 알고리즘 (Winograd 단계 핵심 기법)
-- `overclock_journey_100_to_200mhz.md`, `timing/` — 100MHz → 200MHz timing closure 과정 및 HW 측정 근거
+- `docs/overclock/direct/journey.md`, `timing/` — 100MHz → 200MHz timing closure 과정 및 HW 측정 근거
 - `winograd/` — Conv2 Winograd, Conv1 2× rebalance, cycle-level timing 및 검증 문서
 - `cowork_guide.md` — Git / GitHub / VSCode / Python 환경 세팅부터 PR 까지의 협업 가이드
 - `pdfs/` — 과제 안내문, 베이스라인 보고서, 구현 계획 PDF, Winograd 참고 자료
@@ -250,6 +250,6 @@ Phase 1 이후 모든 CNN 가속기 RTL 이 모이는 메인 디렉토리. 위 B
 
 - 프로젝트 명세 및 계획: [`docs/project_overview.md`](docs/project_overview.md)
 - DSP48E1 SIMD Packing: [`docs/DSP48E1_signed8x8_SIMD_Packing.md`](docs/DSP48E1_signed8x8_SIMD_Packing.md)
-- 200MHz timing closure 기록: [`docs/overclock_journey_100_to_200mhz.md`](docs/overclock_journey_100_to_200mhz.md)
+- 200MHz timing closure 기록: [`docs/overclock/direct/journey.md`](docs/overclock/direct/journey.md)
 - Winograd 작업 인덱스: [`docs/winograd/README.md`](docs/winograd/README.md)
 - 협업 가이드: [`docs/cowork_guide.md`](docs/cowork_guide.md)

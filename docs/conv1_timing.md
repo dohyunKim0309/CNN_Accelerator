@@ -1,6 +1,6 @@
 # Conv1 Pipeline Timing & Overclock Refactor
 
-> ★ **상태(2026-06-04): 프로젝트는 200MHz 에서 timing MET** (impl WNS +0.011). 아래 "300MHz" 는 이 리팩터링의 **원래 목표**이며 — L=2 + adder 4-stage 파이프라인은 그 목표를 위해 도입됐고 200MHz 에 충분한 마진으로 유지된다. 전체 오버클럭 여정과 200MHz 마감 근거: `docs/overclock_journey_100_to_200mhz.md`.
+> ★ **상태(2026-06-04): 프로젝트는 200MHz 에서 timing MET** (impl WNS +0.011). 아래 "300MHz" 는 이 리팩터링의 **원래 목표**이며 — L=2 + adder 4-stage 파이프라인은 그 목표를 위해 도입됐고 200MHz 에 충분한 마진으로 유지된다. 전체 오버클럭 여정과 200MHz 마감 근거: `docs/overclock/direct/journey.md`.
 
 `conv1_engine` 의 cycle-by-cycle 타이밍 single source of truth.
 `conv2_timing.md` 와 같은 역할 — BRAM L / pipeline depth / FSM 수정 시 파급 효과 추적용.

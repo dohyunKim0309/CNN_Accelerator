@@ -10,7 +10,7 @@
 
 > 전제(당시): M 벽(−0.094)은 **carry-bisect 로 RTL 닫음**(journey Iter 14, ★이후 churn 으로 revert). 이 문서는
 > **남은 B·D 벽**을 floorplan(XDC)으로 닫으려던 설계. 상위 = `conv2_winograd_MB_closure_design.md` §1.
-> ★ 모든 좌표·경로는 **추측이 아니라** `vivado_reports/06_route_wns-0.094_MBD-baseline/wino_paths.rpt`
+> ★ 모든 좌표·경로는 **추측이 아니라** `docs/overclock/winograd/06_route_wns-0.094_MBD-baseline/wino_paths.rpt`
 > (routed design, device **7a100t-csg324**)에서 실측한 값.
 
 ## 0. 실측 7 failing endpoint (route 06) 와 bisect 후 잔존
@@ -48,7 +48,7 @@ gic[1]/gic[2].u_it(왼쪽 X14–37) 와 reduce(오른쪽 X64–83) 양쪽으로 
 
 ## 2. 면적 현실 (왜 "작은 box" 불가, "core 만 pin")
 
-`vivado_reports/01` synth hier: **conv2 = 32202 LUT(칩의 51%) / 41285 FF / 2219 SRL / 1472 LUTRAM / 184 DSP**.
+`docs/overclock/winograd/01` synth hier: **conv2 = 32202 LUT(칩의 51%) / 41285 FF / 2219 SRL / 1472 LUTRAM / 184 DSP**.
 - 32K LUT 전체를 작은 pblock 에 못 넣음(반칩 필요).
 - 그러나 **2219 SRL + 1472 LUTRAM = lane 내부 per-PE weight RAM** → DSP 열에 붙어 **float 시켜야** 함.
 - **timing-critical core = tile6_q + grp_q + 4 IT + gather/reduce(가산기 로직)** 는 LUT 가 작음

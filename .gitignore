@@ -1,3 +1,7 @@
 /data/mnist_cache/
 .DS_Store
 *.vcd
+# python / sim junk
+__pycache__/
+*.vvp
+*.vcd

@@ -1,0 +1,192 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2024.1 (win64) Build 5076996 Wed May 22 18:37:14 MDT 2024
+| Date         : Thu Jun 11 21:08:07 2026
+| Host         : DOHYUNKIM266E running 64-bit major release  (build 9200)
+| Command      : report_utilization -hierarchical -hierarchical_depth 4 -file C:/Users/gimdohyeon/wino_util_hier.rpt
+| Design       : cnn_accelerator_system_wrapper
+| Device       : xc7a100tcsg324-1
+| Speed File   : -1
+| Design State : Synthesized
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+Utilization Design Information
+
+Table of Contents
+-----------------
+1. Utilization by Hierarchy
+
+1. Utilization by Hierarchy
+---------------------------
+
++----------------------------------------------------+---------------------------------------------------+------------+------------+---------+------+-------+--------+--------+------------+
+|                      Instance                      |                       Module                      | Total LUTs | Logic LUTs | LUTRAMs | SRLs |  FFs  | RAMB36 | RAMB18 | DSP Blocks |
++----------------------------------------------------+---------------------------------------------------+------------+------------+---------+------+-------+--------+--------+------------+
+| cnn_accelerator_system_wrapper                     |                                             (top) |      48110 |      42663 |    2408 | 3039 | 62221 |     55 |      3 |        236 |
+|   (cnn_accelerator_system_wrapper)                 |                                             (top) |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|   cnn_accelerator_system_i                         |                            cnn_accelerator_system |      48110 |      42663 |    2408 | 3039 | 62221 |     55 |      3 |        236 |
+|     (cnn_accelerator_system_i)                     |                            cnn_accelerator_system |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|     axi_cdma_0                                     |               cnn_accelerator_system_axi_cdma_0_0 |        837 |        706 |       0 |  131 |  1043 |      0 |      0 |          0 |
+|       (axi_cdma_0)                                 |               cnn_accelerator_system_axi_cdma_0_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                                          axi_cdma |        837 |        706 |       0 |  131 |  1043 |      0 |      0 |          0 |
+|         (U0)                                       |                                          axi_cdma |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         GEN_SIMPLE_MODE.I_SIMPLE_MODE_WRAP         |                              axi_cdma_simple_wrap |        837 |        706 |       0 |  131 |  1043 |      0 |      0 |          0 |
+|     axi_uartlite_0                                 |           cnn_accelerator_system_axi_uartlite_0_0 |        104 |         86 |       0 |   18 |   105 |      0 |      0 |          0 |
+|       (axi_uartlite_0)                             |           cnn_accelerator_system_axi_uartlite_0_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                                      axi_uartlite |        104 |         86 |       0 |   18 |   105 |      0 |      0 |          0 |
+|         (U0)                                       |                                      axi_uartlite |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         AXI_LITE_IPIF_I                            |                                     axi_lite_ipif |         31 |         31 |       0 |    0 |    24 |      0 |      0 |          0 |
+|         UARTLITE_CORE_I                            |                                     uartlite_core |         73 |         55 |       0 |   18 |    81 |      0 |      0 |          0 |
+|     c1w_bram_axi                                   |          cnn_accelerator_system_axi_bram_ctrl_1_0 |         96 |         96 |       0 |    0 |    91 |      0 |      0 |          0 |
+|       (c1w_bram_axi)                               |          cnn_accelerator_system_axi_bram_ctrl_1_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                                     axi_bram_ctrl |         96 |         96 |       0 |    0 |    91 |      0 |      0 |          0 |
+|         gext_inst.abcv4_0_ext_inst                 |                                 axi_bram_ctrl_top |         96 |         96 |       0 |    0 |    91 |      0 |      0 |          0 |
+|     clk_wiz_0                                      |                cnn_accelerator_system_clk_wiz_0_0 |          1 |          1 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       inst                                         |        cnn_accelerator_system_clk_wiz_0_0_clk_wiz |          1 |          1 |       0 |    0 |     0 |      0 |      0 |          0 |
+|     cnn_accelerator_wino_0                         |   cnn_accelerator_system_cnn_accelerator_wino_0_0 |      35367 |      31523 |    1472 | 2372 | 49122 |     37 |      3 |        236 |
+|       (cnn_accelerator_wino_0)                     |   cnn_accelerator_system_cnn_accelerator_wino_0_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       inst                                         |                          cnn_accelerator_winograd |      35367 |      31523 |    1472 | 2372 | 49122 |     37 |      3 |        236 |
+|         (inst)                                     |                          cnn_accelerator_winograd |          4 |          4 |       0 |    0 |   601 |      0 |      0 |          0 |
+|         c1c2_bmg                                   |                                     bram_c1_to_c2 |          0 |          0 |       0 |    0 |     0 |      4 |      0 |          0 |
+|         c2pool_bmg                                 |                                   bram_c2_to_pool |          0 |          0 |       0 |    0 |     0 |      7 |      1 |          0 |
+|         conv1                                      |                                   conv1_2x_engine |       1806 |       1659 |       0 |  147 |  4546 |      0 |      1 |         36 |
+|         conv2                                      |                             conv2_winograd_engine |      32202 |      28511 |    1472 | 2219 | 41285 |      4 |      0 |        184 |
+|         fc                                         |                                         fc_engine |        880 |        874 |       0 |    6 |  1711 |     16 |      0 |         16 |
+|         in_bmg                                     |                                        bram_input |          0 |          0 |       0 |    0 |     0 |      0 |      1 |          0 |
+|         maxpool                                    |                                    maxpool_engine |        425 |        425 |       0 |    0 |   959 |      0 |      0 |          0 |
+|         poolfc_bmg                                 |                                   bram_pool_to_fc |          0 |          0 |       0 |    0 |     0 |      2 |      0 |          0 |
+|         res_bmg                                    |                                       bram_output |         41 |         41 |       0 |    0 |     2 |      4 |      0 |          0 |
+|         u_enable_sync                              |                                      cdc_bit_sync |          0 |          0 |       0 |    0 |     2 |      0 |      0 |          0 |
+|         u_imgdone_sync                             |                                    cdc_pulse_sync |          2 |          2 |       0 |    0 |     4 |      0 |      0 |          0 |
+|         u_imgready_sync                            |                                cdc_pulse_sync_911 |          2 |          2 |       0 |    0 |     4 |      0 |      0 |          0 |
+|         u_inputcons_sync                           |                                cdc_pulse_sync_912 |          2 |          2 |       0 |    0 |     4 |      0 |      0 |          0 |
+|         u_start_sync                               |                                cdc_pulse_sync_913 |          3 |          3 |       0 |    0 |     4 |      0 |      0 |          0 |
+|     csr_axi_1                                      |                cnn_accelerator_system_csr_axi_1_0 |         53 |         53 |       0 |    0 |    82 |      0 |      0 |          0 |
+|       (csr_axi_1)                                  |                cnn_accelerator_system_csr_axi_1_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       inst                                         |                                           csr_axi |         53 |         53 |       0 |    0 |    82 |      0 |      0 |          0 |
+|         csr_axi_slave_lite_v1_0_csr_inst           |                       csr_axi_slave_lite_v1_0_csr |         53 |         53 |       0 |    0 |    82 |      0 |      0 |          0 |
+|     fcw_bram_axi                                   |          cnn_accelerator_system_axi_bram_ctrl_3_0 |        164 |        164 |       0 |    0 |   638 |      0 |      0 |          0 |
+|       (fcw_bram_axi)                               |          cnn_accelerator_system_axi_bram_ctrl_3_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                     axi_bram_ctrl__parameterized1 |        164 |        164 |       0 |    0 |   638 |      0 |      0 |          0 |
+|         gext_inst.abcv4_0_ext_inst                 |                 axi_bram_ctrl_top__parameterized0 |        164 |        164 |       0 |    0 |   638 |      0 |      0 |          0 |
+|     input_bram_axi                                 |          cnn_accelerator_system_axi_bram_ctrl_0_0 |        156 |        156 |       0 |    0 |   117 |      0 |      0 |          0 |
+|       (input_bram_axi)                             |          cnn_accelerator_system_axi_bram_ctrl_0_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                     axi_bram_ctrl__parameterized3 |        156 |        156 |       0 |    0 |   117 |      0 |      0 |          0 |
+|         gext_inst.abcv4_0_ext_inst                 |                 axi_bram_ctrl_top__parameterized1 |        156 |        156 |       0 |    0 |   117 |      0 |      0 |          0 |
+|     mdm_1                                          |                    cnn_accelerator_system_mdm_1_0 |         94 |         87 |       0 |    7 |   110 |      0 |      0 |          0 |
+|       (mdm_1)                                      |                    cnn_accelerator_system_mdm_1_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                                               MDM |         94 |         87 |       0 |    7 |   110 |      0 |      0 |          0 |
+|         (U0)                                       |                                               MDM |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         MDM_Core_I1                                |                                          MDM_Core |         88 |         81 |       0 |    7 |   110 |      0 |      0 |          0 |
+|         No_Dbg_Reg_Access.BUFG_DRCK                |                                           MB_BUFG |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         Use_E2.BSCAN_I                             |                                        MB_BSCANE2 |          5 |          5 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         Use_E2.LUT1_I                              |                               mdm_v3_2_26_MB_LUT1 |          1 |          1 |       0 |    0 |     0 |      0 |      0 |          0 |
+|     microblaze_0                                   |             cnn_accelerator_system_microblaze_0_1 |       1925 |       1577 |     172 |  176 |  1644 |     14 |      0 |          0 |
+|       (microblaze_0)                               |             cnn_accelerator_system_microblaze_0_1 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                                        MicroBlaze |       1925 |       1577 |     172 |  176 |  1644 |     14 |      0 |          0 |
+|         (U0)                                       |                                        MicroBlaze |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         MicroBlaze_Core_I                          |                                   MicroBlaze_Core |       1925 |       1577 |     172 |  176 |  1644 |     14 |      0 |          0 |
+|     microblaze_0_local_memory                      |              microblaze_0_local_memory_imp_A80XT4 |         14 |         12 |       0 |    2 |    14 |      4 |      0 |          0 |
+|       (microblaze_0_local_memory)                  |              microblaze_0_local_memory_imp_A80XT4 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       dlmb_bram_if_cntlr                           |       cnn_accelerator_system_dlmb_bram_if_cntlr_0 |          6 |          6 |       0 |    0 |     2 |      0 |      0 |          0 |
+|         (dlmb_bram_if_cntlr)                       |       cnn_accelerator_system_dlmb_bram_if_cntlr_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         U0                                         |                                 lmb_bram_if_cntlr |          6 |          6 |       0 |    0 |     2 |      0 |      0 |          0 |
+|       dlmb_v10                                     |                 cnn_accelerator_system_dlmb_v10_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       ilmb_bram_if_cntlr                           |       cnn_accelerator_system_ilmb_bram_if_cntlr_0 |          2 |          2 |       0 |    0 |     2 |      0 |      0 |          0 |
+|         (ilmb_bram_if_cntlr)                       |       cnn_accelerator_system_ilmb_bram_if_cntlr_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         U0                                         |                 lmb_bram_if_cntlr__parameterized1 |          2 |          2 |       0 |    0 |     2 |      0 |      0 |          0 |
+|       ilmb_v10                                     |                 cnn_accelerator_system_ilmb_v10_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       lmb_bram                                     |                 cnn_accelerator_system_lmb_bram_0 |          6 |          4 |       0 |    2 |    10 |      4 |      0 |          0 |
+|         (lmb_bram)                                 |                 cnn_accelerator_system_lmb_bram_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         U0                                         |               blk_mem_gen_v8_4_8__parameterized15 |          6 |          4 |       0 |    2 |    10 |      4 |      0 |          0 |
+|     mig_7series_0                                  |            cnn_accelerator_system_mig_7series_0_0 |       4942 |       4340 |     452 |  150 |  4111 |      0 |      0 |          0 |
+|       u_cnn_accelerator_system_mig_7series_0_0_mig |        cnn_accelerator_system_mig_7series_0_0_mig |       4942 |       4340 |     452 |  150 |  4111 |      0 |      0 |          0 |
+|         temp_mon_enabled.u_tempmon                 |                          mig_7series_v4_2_tempmon |         40 |         40 |       0 |    0 |   122 |      0 |      0 |          0 |
+|         u_ddr3_clk_ibuf                            |                         mig_7series_v4_2_clk_ibuf |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         u_ddr3_infrastructure                      |                   mig_7series_v4_2_infrastructure |         26 |         26 |       0 |    0 |    57 |      0 |      0 |          0 |
+|         u_iodelay_ctrl                             |                     mig_7series_v4_2_iodelay_ctrl |          2 |          2 |       0 |    0 |    15 |      0 |      0 |          0 |
+|         u_memc_ui_top_axi                          |                  mig_7series_v4_2_memc_ui_top_axi |       4874 |       4272 |     452 |  150 |  3917 |      0 |      0 |          0 |
+|     perif_interconnect_1                           |       cnn_accelerator_system_axi_interconnect_1_0 |        902 |        886 |       0 |   16 |   642 |      0 |      0 |          0 |
+|       (perif_interconnect_1)                       |       cnn_accelerator_system_axi_interconnect_1_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       m00_couplers                                 |                          m00_couplers_imp_181O402 |         50 |         50 |       0 |    0 |    27 |      0 |      0 |          0 |
+|         (m00_couplers)                             |                          m00_couplers_imp_181O402 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_ds                                    |                  cnn_accelerator_system_auto_ds_1 |         50 |         50 |       0 |    0 |    27 |      0 |      0 |          0 |
+|       m01_couplers                                 |                           m01_couplers_imp_UWOSMG |         57 |         57 |       0 |    0 |    51 |      0 |      0 |          0 |
+|         (m01_couplers)                             |                           m01_couplers_imp_UWOSMG |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_ds                                    |                  cnn_accelerator_system_auto_ds_2 |         57 |         57 |       0 |    0 |    51 |      0 |      0 |          0 |
+|       m02_couplers                                 |                          m02_couplers_imp_1A6YQ1J |         88 |         88 |       0 |    0 |    51 |      0 |      0 |          0 |
+|         (m02_couplers)                             |                          m02_couplers_imp_1A6YQ1J |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_ds                                    |                  cnn_accelerator_system_auto_ds_3 |         88 |         88 |       0 |    0 |    51 |      0 |      0 |          0 |
+|       m03_couplers                                 |                           m03_couplers_imp_OBC5X9 |         79 |         79 |       0 |    0 |    20 |      0 |      0 |          0 |
+|         (m03_couplers)                             |                           m03_couplers_imp_OBC5X9 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_ds                                    |                  cnn_accelerator_system_auto_ds_4 |         79 |         79 |       0 |    0 |    20 |      0 |      0 |          0 |
+|         auto_pc                                    |                  cnn_accelerator_system_auto_pc_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       m04_couplers                                 |                          m04_couplers_imp_1UDD8IW |         62 |         62 |       0 |    0 |    20 |      0 |      0 |          0 |
+|         (m04_couplers)                             |                          m04_couplers_imp_1UDD8IW |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_ds                                    |                  cnn_accelerator_system_auto_ds_5 |         62 |         62 |       0 |    0 |    20 |      0 |      0 |          0 |
+|         auto_pc                                    |                  cnn_accelerator_system_auto_pc_1 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       m05_couplers                                 |                           m05_couplers_imp_8KZDTU |        207 |        191 |       0 |   16 |   218 |      0 |      0 |          0 |
+|         (m05_couplers)                             |                           m05_couplers_imp_8KZDTU |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_pc                                    |                  cnn_accelerator_system_auto_pc_2 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_us                                    |                  cnn_accelerator_system_auto_us_3 |        207 |        191 |       0 |   16 |   218 |      0 |      0 |          0 |
+|       m06_couplers                                 |                          m06_couplers_imp_1NX0IV1 |         60 |         60 |       0 |    0 |    51 |      0 |      0 |          0 |
+|         (m06_couplers)                             |                          m06_couplers_imp_1NX0IV1 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_ds                                    |                  cnn_accelerator_system_auto_ds_6 |         60 |         60 |       0 |    0 |    51 |      0 |      0 |          0 |
+|         auto_pc                                    |                  cnn_accelerator_system_auto_pc_3 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       s00_couplers                                 |                          s00_couplers_imp_1887HD0 |         33 |         33 |       0 |    0 |    13 |      0 |      0 |          0 |
+|         (s00_couplers)                             |                          s00_couplers_imp_1887HD0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_us                                    |                  cnn_accelerator_system_auto_us_4 |         33 |         33 |       0 |    0 |    13 |      0 |      0 |          0 |
+|       xbar                                         |                     cnn_accelerator_system_xbar_1 |        266 |        266 |       0 |    0 |   191 |      0 |      0 |          0 |
+|         (xbar)                                     |                     cnn_accelerator_system_xbar_1 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         inst                                       |                 axi_crossbar_v2_1_32_axi_crossbar |        266 |        266 |       0 |    0 |   191 |      0 |      0 |          0 |
+|     ram_interconnect                               |       cnn_accelerator_system_axi_interconnect_0_0 |       3210 |       2733 |     312 |  165 |  4244 |      0 |      0 |          0 |
+|       (ram_interconnect)                           |       cnn_accelerator_system_axi_interconnect_0_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       m00_couplers                                 |                          m00_couplers_imp_1Q7992N |        520 |        252 |     268 |    0 |  1236 |      0 |      0 |          0 |
+|         (m00_couplers)                             |                          m00_couplers_imp_1Q7992N |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_cc                                    |                  cnn_accelerator_system_auto_cc_0 |        520 |        252 |     268 |    0 |  1236 |      0 |      0 |          0 |
+|       m01_couplers                                 |                           m01_couplers_imp_4ZH0N9 |        502 |        458 |      44 |    0 |   471 |      0 |      0 |          0 |
+|         (m01_couplers)                             |                           m01_couplers_imp_4ZH0N9 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_ds                                    |                  cnn_accelerator_system_auto_ds_0 |        502 |        458 |      44 |    0 |   471 |      0 |      0 |          0 |
+|       s00_couplers                                 |                          s00_couplers_imp_1QP1VBD |        245 |        212 |       0 |   33 |   492 |      0 |      0 |          0 |
+|         (s00_couplers)                             |                          s00_couplers_imp_1QP1VBD |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_us                                    |                  cnn_accelerator_system_auto_us_0 |        245 |        212 |       0 |   33 |   492 |      0 |      0 |          0 |
+|       s01_couplers                                 |                           s01_couplers_imp_4HOKTF |        543 |        477 |       0 |   66 |   878 |      0 |      0 |          0 |
+|         (s01_couplers)                             |                           s01_couplers_imp_4HOKTF |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_us                                    |                  cnn_accelerator_system_auto_us_1 |        543 |        477 |       0 |   66 |   878 |      0 |      0 |          0 |
+|       s02_couplers                                 |                          s02_couplers_imp_1O9GEZG |        431 |        375 |       0 |   56 |   610 |      0 |      0 |          0 |
+|         (s02_couplers)                             |                          s02_couplers_imp_1O9GEZG |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         auto_us                                    |                  cnn_accelerator_system_auto_us_2 |        431 |        375 |       0 |   56 |   610 |      0 |      0 |          0 |
+|       xbar                                         |                     cnn_accelerator_system_xbar_0 |        969 |        959 |       0 |   10 |   557 |      0 |      0 |          0 |
+|         (xbar)                                     |                     cnn_accelerator_system_xbar_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|         inst                                       | axi_crossbar_v2_1_32_axi_crossbar__parameterized0 |        969 |        959 |       0 |   10 |   557 |      0 |      0 |          0 |
+|     result_bram_axi                                |          cnn_accelerator_system_axi_bram_ctrl_0_1 |        114 |        114 |       0 |    0 |   123 |      0 |      0 |          0 |
+|       (result_bram_axi)                            |          cnn_accelerator_system_axi_bram_ctrl_0_1 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                     axi_bram_ctrl__parameterized5 |        114 |        114 |       0 |    0 |   123 |      0 |      0 |          0 |
+|         gext_inst.abcv4_0_ext_inst                 |                 axi_bram_ctrl_top__parameterized2 |        114 |        114 |       0 |    0 |   123 |      0 |      0 |          0 |
+|     rst_clk_wiz_0_100M                             |       cnn_accelerator_system_rst_clk_wiz_0_100M_0 |         17 |         16 |       0 |    1 |    30 |      0 |      0 |          0 |
+|       (rst_clk_wiz_0_100M)                         |       cnn_accelerator_system_rst_clk_wiz_0_100M_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                                    proc_sys_reset |         17 |         16 |       0 |    1 |    30 |      0 |      0 |          0 |
+|         (U0)                                       |                                    proc_sys_reset |          0 |          0 |       0 |    0 |     3 |      0 |      0 |          0 |
+|         EXT_LPF                                    |                                               lpf |          4 |          3 |       0 |    1 |     9 |      0 |      0 |          0 |
+|         SEQ                                        |                                      sequence_psr |         13 |         13 |       0 |    0 |    18 |      0 |      0 |          0 |
+|     rst_mig_7series_0_81M                          |    cnn_accelerator_system_rst_mig_7series_0_81M_0 |         13 |         12 |       0 |    1 |    25 |      0 |      0 |          0 |
+|       (rst_mig_7series_0_81M)                      |    cnn_accelerator_system_rst_mig_7series_0_81M_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                    proc_sys_reset__parameterized1 |         13 |         12 |       0 |    1 |    25 |      0 |      0 |          0 |
+|         (U0)                                       |                    proc_sys_reset__parameterized1 |          0 |          0 |       0 |    0 |     1 |      0 |      0 |          0 |
+|         EXT_LPF                                    |                               lpf__parameterized0 |          3 |          2 |       0 |    1 |     9 |      0 |      0 |          0 |
+|         SEQ                                        |                                  sequence_psr_792 |         10 |         10 |       0 |    0 |    15 |      0 |      0 |          0 |
+|     util_ds_buf_0                                  |            cnn_accelerator_system_util_ds_buf_0_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       (util_ds_buf_0)                              |            cnn_accelerator_system_util_ds_buf_0_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                                       util_ds_buf |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|     wino_bram_axi                                  |          cnn_accelerator_system_axi_bram_ctrl_0_2 |        101 |        101 |       0 |    0 |    80 |      0 |      0 |          0 |
+|       (wino_bram_axi)                              |          cnn_accelerator_system_axi_bram_ctrl_0_2 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|       U0                                           |                 axi_bram_ctrl__parameterized5_786 |        101 |        101 |       0 |    0 |    80 |      0 |      0 |          0 |
+|         gext_inst.abcv4_0_ext_inst                 |             axi_bram_ctrl_top__parameterized2_787 |        101 |        101 |       0 |    0 |    80 |      0 |      0 |          0 |
+|     xlslice_0                                      |                cnn_accelerator_system_xlslice_0_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|     xlslice_1                                      |                cnn_accelerator_system_xlslice_1_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|     xlslice_2                                      |                cnn_accelerator_system_xlslice_2_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|     xlslice_3                                      |                cnn_accelerator_system_xlslice_3_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
+|     xlslice_4                                      |                cnn_accelerator_system_xlslice_4_0 |          0 |          0 |       0 |    0 |     0 |      0 |      0 |          0 |
++----------------------------------------------------+---------------------------------------------------+------------+------------+---------+------+-------+--------+--------+------------+
+
+

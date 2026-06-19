@@ -9,7 +9,7 @@
 ## 0. 한 줄 요약
 
 8 IC×26×26 INT8 → 16 OC×24×24 INT8 conv (3×3 stride1 no-pad) 을, **6×6 tile(stride4)** 단위로
-`V=Bᵀ·d·B`(입력변환, 곱셈기0) → `M=Σ_IC U⊙V`(184 DSP) → `Y16=Aᵀ·M·A`(출력변환, 곱셈기0) → `sat(Y16>>14)+ReLU` 로 계산. 곱셈 144→46(3.13×), conv2 1798→**1336 cyc/img**(1.35×, 측정; 설계 추정은 ~1324였음), DSP 192→184.
+`V=Bᵀ·d·B`(입력변환, 곱셈기0) → `M=Σ_IC U⊙V`(184 DSP) → `Y16=Aᵀ·M·A`(출력변환, 곱셈기0) → `sat(Y16>>14)+ReLU` 로 계산. 곱셈 144→46(3.13×), conv2 1798→**1336 cyc/img**(측정; 설계 추정 ~1324), DSP 192→184. ※ 본 문서는 **기능 설계(pre-overclock)** 기준 — overclock+carry-bisect 후 현행 **1349 cyc/img**(timing/arch 문서).
 
 ---
 

@@ -1,0 +1,4 @@
+worstSlack    count   endpoint-class
+------------------------------------------------------------------------------------------
+    -0.150       22   conv2/gic.u_it/tre_reg
+    -0.021        1   conv2/trow_cnt_reg_rep__28

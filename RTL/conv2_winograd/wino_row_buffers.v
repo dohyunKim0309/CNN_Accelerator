@@ -32,23 +32,53 @@ module wino_row_buffers (
     output wire [6*6*64-1:0] tile6_flat   // [(rr*6+cc)*64 +: 64]
 );
 
-    reg [63:0] rb [0:1][0:5][0:25];
-
-    // write (producer)
+    //==========================================================================
+    // ★ 200MHz v2: 저장구조 = 6 row-bank × 64-deep(2set×26col) × 64b 분산 LUTRAM.
+    //   routed 빌드 worst(−2.037)가 rb write broadcast (wr_data fo=312, route 93%,
+    //   logic 0단)였고, read 쪽도 같은 20K-FF 산개가 근원 → 구조 교체:
+    //   - FF 20K + 12:1 read-mux 트리(~5K LUT) 제거 → ~1.3K LUTRAM. 옛 col-mux 는
+    //     RAM addressing({set, 4*tx+cc})으로 흡수, write broadcast 는 bank-local
+    //     narrow write 로 소멸. (weight per-PE LUTRAM 화(Iter 2)와 동일 처방.)
+    //   - write +1 register(wr_*_q): driver 복제 + landing 1-cycle 지연
+    //     → engine PDRAIN 3-cycle 로 정렬 (set_ready 지연).
+    //   - read-during-write 의미는 FF 판과 동일(edge 전 old 값) → bit-exact 불변.
+    //==========================================================================
+    // max_fanout 8: data bit 당 sink ~12 (6 bank × 2 copy) → 32 로는 복제가 아예
+    //   안 일어났음 (routed: u_rb write 779 EP −1.2~−1.31) → 8 로 강제 분할
+    (* max_fanout = 8 *) reg [63:0] wr_data_q;
+    (* max_fanout = 8 *) reg        wr_set_q;
+    (* max_fanout = 8 *) reg [4:0]  wr_col_q;
+    // ★ bank WE 사전 디코드: 옛 [wr_en_q & (row==gr)] 디코드 LUT 출력이 bank 당
+    //   fanout 516 net 으로 잔존 (routed −0.19) → row decode 를 q단 앞으로 옮겨
+    //   bank 별 등록 WE + max_fanout 복제. write landing cycle 불변 (PDRAIN 3 유지).
+    (* max_fanout = 64 *) reg [5:0] wr_bank_we_q;
+    integer bi;
     always @(posedge clk) begin
-        if (wr_en) rb[wr_set][wr_row][wr_col] <= wr_data;
+        wr_set_q  <= wr_set;
+        wr_col_q  <= wr_col;
+        wr_data_q <= wr_data;
+        for (bi = 0; bi < 6; bi = bi + 1)
+            wr_bank_we_q[bi] <= wr_en && (wr_row == bi);
     end
 
-    // read (consumer, combinational): 6×6 window at col base 4*rd_tx
-    // (procedural dynamic-index loop — generate+assign 의 3D 동적 index 가 iverilog 충돌)
+    // read 주소 6개 (cc=0..5): cbase+cc ≤ 25 → set bit 로 carry 없음
     wire [4:0] cbase = {rd_tx, 2'b00};   // 4*rd_tx (0,4,8,12,16,20)
-    reg [6*6*64-1:0] tile6_r;
-    integer rr, cc;
-    always @(*) begin
-        for (rr = 0; rr < 6; rr = rr + 1)
-            for (cc = 0; cc < 6; cc = cc + 1)
-                tile6_r[(rr*6+cc)*64 +: 64] = rb[rd_set][rr][cbase + cc[4:0]];
-    end
-    assign tile6_flat = tile6_r;
+    reg [5:0] ra [0:5];
+    integer ai;
+    always @(*) for (ai=0; ai<6; ai=ai+1) ra[ai] = {rd_set, cbase} + ai;
+
+    genvar gr;
+    generate for (gr=0; gr<6; gr=gr+1) begin : g_row
+        (* ram_style = "distributed" *) reg [63:0] mem [0:63];
+        always @(posedge clk)
+            if (wr_bank_we_q[gr])
+                mem[{wr_set_q, wr_col_q}] <= wr_data_q;
+
+        reg [6*64-1:0] row_rd;
+        integer ci;
+        always @(*) for (ci=0; ci<6; ci=ci+1)
+            row_rd[ci*64 +: 64] = mem[ra[ci]];
+        assign tile6_flat[gr*6*64 +: 6*64] = row_rd;
+    end endgenerate
 
 endmodule

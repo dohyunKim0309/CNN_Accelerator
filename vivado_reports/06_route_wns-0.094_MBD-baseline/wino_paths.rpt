@@ -1,0 +1,699 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2024.1 (win64) Build 5076996 Wed May 22 18:37:14 MDT 2024
+| Date         : Mon Jun 15 20:14:14 2026
+| Host         : DOHYUNKIM266E running 64-bit major release  (build 9200)
+| Command      : report_timing -setup -slack_lesser_than 0 -max_paths 50 -nworst 1 -unique_pins -input_pins -nets -file C:/Users/gimdohyeon/wino_paths146.rpt
+| Design       : cnn_accelerator_system_wrapper
+| Device       : 7a100t-csg324
+| Speed File   : -1  PRODUCTION 1.23 2018-06-13
+| Design State : Physopt postRoute
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Timing Report
+
+Slack (VIOLATED) :        -0.094ns  (required time - arrival time)
+  Source:                 cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25][4]/C
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Destination:            cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[874]/D
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Path Group:             clk_out3_cnn_accelerator_system_clk_wiz_0_0
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            5.000ns  (clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@5.000ns - clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@0.000ns)
+  Data Path Delay:        4.942ns  (logic 2.851ns (57.689%)  route 2.091ns (42.311%))
+  Logic Levels:           9  (CARRY4=7 LUT1=1 LUT2=1)
+  Clock Path Skew:        -0.147ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    4.914ns = ( 9.914 - 5.000 ) 
+    Source Clock Delay      (SCD):    5.318ns
+    Clock Pessimism Removal (CPR):    0.257ns
+  Clock Uncertainty:      0.067ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.113ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      0.000     0.000 r  
+    E3                                                0.000     0.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     0.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.482     1.482 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           2.025     3.506    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.096     3.602 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.809     5.412    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.922     1.490 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           2.018     3.508    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.096     3.604 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.714     5.318    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X83Y110        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25][4]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X83Y110        FDRE (Prop_fdre_C_Q)         0.419     5.737 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25][4]/Q
+                         net (fo=2, routed)           1.494     7.231    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25]_557[4]
+    SLICE_X64Y126                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat[832]_i_5/I1
+    SLICE_X64Y126        LUT2 (Prop_lut2_I1_O)        0.299     7.530 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat[832]_i_5/O
+                         net (fo=1, routed)           0.000     7.530    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat[832]_i_5_n_0
+    SLICE_X64Y126                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[832]_i_1/S[0]
+    SLICE_X64Y126        CARRY4 (Prop_carry4_S[0]_CO[3])
+                                                      0.532     8.062 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[832]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.062    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[832]_i_1_n_0
+    SLICE_X64Y127                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[836]_i_1/CI
+    SLICE_X64Y127        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     8.176 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[836]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.176    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[836]_i_1_n_0
+    SLICE_X64Y128                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[840]_i_1/CI
+    SLICE_X64Y128        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     8.290 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[840]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.290    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[840]_i_1_n_0
+    SLICE_X64Y129                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[844]_i_1/CI
+    SLICE_X64Y129        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     8.404 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[844]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.404    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[844]_i_1_n_0
+    SLICE_X64Y130                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[848]_i_1/CI
+    SLICE_X64Y130        CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.329     8.733 f  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[848]_i_1/O[3]
+                         net (fo=2, routed)           0.597     9.330    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat_reg[874][238]
+    SLICE_X65Y130                                                     f  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat[873]_i_2/I0
+    SLICE_X65Y130        LUT1 (Prop_lut1_I0_O)        0.306     9.636 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat[873]_i_2/O
+                         net (fo=1, routed)           0.000     9.636    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst_n_4354
+    SLICE_X65Y130                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[873]_i_1/S[3]
+    SLICE_X65Y130        CARRY4 (Prop_carry4_S[3]_CO[3])
+                                                      0.401    10.037 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[873]_i_1/CO[3]
+                         net (fo=1, routed)           0.000    10.037    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat_reg[874]_0[0]
+    SLICE_X65Y131                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat_reg[874]_i_2/CI
+    SLICE_X65Y131        CARRY4 (Prop_carry4_CI_O[0])
+                                                      0.223    10.260 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat_reg[874]_i_2/O[0]
+                         net (fo=1, routed)           0.000    10.260    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/mim_flat0[24]
+    SLICE_X65Y131        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[874]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      5.000     5.000 r  
+    E3                                                0.000     5.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     5.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.411     6.411 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           1.920     8.331    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.091     8.422 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.683    10.105    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.694     6.411 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           1.923     8.334    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.091     8.425 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.489     9.914    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X65Y131        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[874]/C
+                         clock pessimism              0.257    10.171    
+                         clock uncertainty           -0.067    10.105    
+    SLICE_X65Y131        FDRE (Setup_fdre_C_D)        0.062    10.167    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[874]
+  -------------------------------------------------------------------
+                         required time                         10.167    
+                         arrival time                         -10.260    
+  -------------------------------------------------------------------
+                         slack                                 -0.094    
+
+Slack (VIOLATED) :        -0.089ns  (required time - arrival time)
+  Source:                 cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25][4]/C
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Destination:            cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[871]/D
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Path Group:             clk_out3_cnn_accelerator_system_clk_wiz_0_0
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            5.000ns  (clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@5.000ns - clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@0.000ns)
+  Data Path Delay:        4.937ns  (logic 2.848ns (57.689%)  route 2.089ns (42.311%))
+  Logic Levels:           8  (CARRY4=6 LUT1=1 LUT2=1)
+  Clock Path Skew:        -0.148ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    4.913ns = ( 9.913 - 5.000 ) 
+    Source Clock Delay      (SCD):    5.318ns
+    Clock Pessimism Removal (CPR):    0.257ns
+  Clock Uncertainty:      0.067ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.113ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      0.000     0.000 r  
+    E3                                                0.000     0.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     0.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.482     1.482 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           2.025     3.506    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.096     3.602 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.809     5.412    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.922     1.490 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           2.018     3.508    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.096     3.604 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.714     5.318    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X83Y110        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25][4]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X83Y110        FDRE (Prop_fdre_C_Q)         0.419     5.737 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25][4]/Q
+                         net (fo=2, routed)           1.494     7.231    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25]_557[4]
+    SLICE_X64Y126                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat[832]_i_5/I1
+    SLICE_X64Y126        LUT2 (Prop_lut2_I1_O)        0.299     7.530 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat[832]_i_5/O
+                         net (fo=1, routed)           0.000     7.530    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat[832]_i_5_n_0
+    SLICE_X64Y126                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[832]_i_1/S[0]
+    SLICE_X64Y126        CARRY4 (Prop_carry4_S[0]_CO[3])
+                                                      0.532     8.062 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[832]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.062    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[832]_i_1_n_0
+    SLICE_X64Y127                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[836]_i_1/CI
+    SLICE_X64Y127        CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.329     8.391 f  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[836]_i_1/O[3]
+                         net (fo=2, routed)           0.595     8.986    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat_reg[874][226]
+    SLICE_X65Y127                                                     f  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat[861]_i_2/I0
+    SLICE_X65Y127        LUT1 (Prop_lut1_I0_O)        0.306     9.292 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat[861]_i_2/O
+                         net (fo=1, routed)           0.000     9.292    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst_n_4342
+    SLICE_X65Y127                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[861]_i_1/S[3]
+    SLICE_X65Y127        CARRY4 (Prop_carry4_S[3]_CO[3])
+                                                      0.401     9.693 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[861]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     9.693    cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[861]_i_1_n_0
+    SLICE_X65Y128                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[865]_i_1/CI
+    SLICE_X65Y128        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     9.807 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[865]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     9.807    cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[865]_i_1_n_0
+    SLICE_X65Y129                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[869]_i_1/CI
+    SLICE_X65Y129        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     9.921 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[869]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     9.921    cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[869]_i_1_n_0
+    SLICE_X65Y130                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[873]_i_1/CI
+    SLICE_X65Y130        CARRY4 (Prop_carry4_CI_O[1])
+                                                      0.334    10.255 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[873]_i_1/O[1]
+                         net (fo=1, routed)           0.000    10.255    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[873]_0[237]
+    SLICE_X65Y130        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[871]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      5.000     5.000 r  
+    E3                                                0.000     5.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     5.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.411     6.411 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           1.920     8.331    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.091     8.422 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.683    10.105    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.694     6.411 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           1.923     8.334    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.091     8.425 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.488     9.913    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X65Y130        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[871]/C
+                         clock pessimism              0.257    10.170    
+                         clock uncertainty           -0.067    10.104    
+    SLICE_X65Y130        FDRE (Setup_fdre_C_D)        0.062    10.166    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[871]
+  -------------------------------------------------------------------
+                         required time                         10.166    
+                         arrival time                         -10.255    
+  -------------------------------------------------------------------
+                         slack                                 -0.089    
+
+Slack (VIOLATED) :        -0.088ns  (required time - arrival time)
+  Source:                 cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/grp_q_reg_rep__75/C
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Destination:            cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_reg[1][5][10]/D
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Path Group:             clk_out3_cnn_accelerator_system_clk_wiz_0_0
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            5.000ns  (clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@5.000ns - clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@0.000ns)
+  Data Path Delay:        5.098ns  (logic 1.617ns (31.718%)  route 3.481ns (68.282%))
+  Logic Levels:           5  (CARRY4=2 LUT2=1 LUT3=1 LUT6=1)
+  Clock Path Skew:        -0.032ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    4.935ns = ( 9.935 - 5.000 ) 
+    Source Clock Delay      (SCD):    5.226ns
+    Clock Pessimism Removal (CPR):    0.259ns
+  Clock Uncertainty:      0.067ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.113ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      0.000     0.000 r  
+    E3                                                0.000     0.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     0.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.482     1.482 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           2.025     3.506    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.096     3.602 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.809     5.412    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.922     1.490 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           2.018     3.508    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.096     3.604 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.621     5.226    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X30Y76         FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/grp_q_reg_rep__75/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X30Y76         FDRE (Prop_fdre_C_Q)         0.518     5.744 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/grp_q_reg_rep__75/Q
+                         net (fo=8, routed)           1.032     6.776    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/i___212_0
+    SLICE_X28Y72                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/i___38_i_3__0/I1
+    SLICE_X28Y72         LUT3 (Prop_lut3_I1_O)        0.124     6.900 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/i___38_i_3__0/O
+                         net (fo=7, routed)           0.933     7.833    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/gic[1].d_flat_ic[141]
+    SLICE_X29Y88                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/i___38_rewire/I1
+    SLICE_X29Y88         LUT2 (Prop_lut2_I1_O)        0.124     7.957 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/i___38_rewire/O
+                         net (fo=2, routed)           0.416     8.372    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/i___38_n_0
+    SLICE_X29Y87                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre[1][5][7]_i_3__0_rewire/I5
+    SLICE_X29Y87         LUT6 (Prop_lut6_I5_O)        0.124     8.496 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre[1][5][7]_i_3__0_rewire/O
+                         net (fo=2, routed)           1.100     9.597    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre[1][5][7]_i_3__0_n_0
+    SLICE_X14Y77                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_reg[1][5][7]_i_1__0/DI[2]
+    SLICE_X14Y77         CARRY4 (Prop_carry4_DI[2]_CO[3])
+                                                      0.404    10.001 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_reg[1][5][7]_i_1__0/CO[3]
+                         net (fo=1, routed)           0.000    10.001    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_reg[1][5][7]_i_1__0_n_0
+    SLICE_X14Y78                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_reg[1][5][10]_i_1__0/CI
+    SLICE_X14Y78         CARRY4 (Prop_carry4_CI_O[1])
+                                                      0.323    10.324 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_reg[1][5][10]_i_1__0/O[1]
+                         net (fo=1, routed)           0.000    10.324    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_c[1][5]_1064[10]
+    SLICE_X14Y78         FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_reg[1][5][10]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      5.000     5.000 r  
+    E3                                                0.000     5.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     5.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.411     6.411 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           1.920     8.331    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.091     8.422 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.683    10.105    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.694     6.411 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           1.923     8.334    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.091     8.425 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.509     9.935    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/clk
+    SLICE_X14Y78         FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_reg[1][5][10]/C
+                         clock pessimism              0.259    10.194    
+                         clock uncertainty           -0.067    10.127    
+    SLICE_X14Y78         FDRE (Setup_fdre_C_D)        0.109    10.236    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[1].u_it/tre_reg[1][5][10]
+  -------------------------------------------------------------------
+                         required time                         10.236    
+                         arrival time                         -10.324    
+  -------------------------------------------------------------------
+                         slack                                 -0.088    
+
+Slack (VIOLATED) :        -0.068ns  (required time - arrival time)
+  Source:                 cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25][4]/C
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Destination:            cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[873]/D
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Path Group:             clk_out3_cnn_accelerator_system_clk_wiz_0_0
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            5.000ns  (clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@5.000ns - clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@0.000ns)
+  Data Path Delay:        4.916ns  (logic 2.827ns (57.509%)  route 2.089ns (42.491%))
+  Logic Levels:           8  (CARRY4=6 LUT1=1 LUT2=1)
+  Clock Path Skew:        -0.148ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    4.913ns = ( 9.913 - 5.000 ) 
+    Source Clock Delay      (SCD):    5.318ns
+    Clock Pessimism Removal (CPR):    0.257ns
+  Clock Uncertainty:      0.067ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.113ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      0.000     0.000 r  
+    E3                                                0.000     0.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     0.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.482     1.482 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           2.025     3.506    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.096     3.602 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.809     5.412    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.922     1.490 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           2.018     3.508    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.096     3.604 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.714     5.318    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X83Y110        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25][4]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X83Y110        FDRE (Prop_fdre_C_Q)         0.419     5.737 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25][4]/Q
+                         net (fo=2, routed)           1.494     7.231    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[25]_557[4]
+    SLICE_X64Y126                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat[832]_i_5/I1
+    SLICE_X64Y126        LUT2 (Prop_lut2_I1_O)        0.299     7.530 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat[832]_i_5/O
+                         net (fo=1, routed)           0.000     7.530    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat[832]_i_5_n_0
+    SLICE_X64Y126                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[832]_i_1/S[0]
+    SLICE_X64Y126        CARRY4 (Prop_carry4_S[0]_CO[3])
+                                                      0.532     8.062 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[832]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.062    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[832]_i_1_n_0
+    SLICE_X64Y127                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[836]_i_1/CI
+    SLICE_X64Y127        CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.329     8.391 f  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[836]_i_1/O[3]
+                         net (fo=2, routed)           0.595     8.986    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat_reg[874][226]
+    SLICE_X65Y127                                                     f  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat[861]_i_2/I0
+    SLICE_X65Y127        LUT1 (Prop_lut1_I0_O)        0.306     9.292 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/u_asm/m_im_flat[861]_i_2/O
+                         net (fo=1, routed)           0.000     9.292    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst_n_4342
+    SLICE_X65Y127                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[861]_i_1/S[3]
+    SLICE_X65Y127        CARRY4 (Prop_carry4_S[3]_CO[3])
+                                                      0.401     9.693 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[861]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     9.693    cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[861]_i_1_n_0
+    SLICE_X65Y128                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[865]_i_1/CI
+    SLICE_X65Y128        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     9.807 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[865]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     9.807    cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[865]_i_1_n_0
+    SLICE_X65Y129                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[869]_i_1/CI
+    SLICE_X65Y129        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     9.921 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[869]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     9.921    cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[869]_i_1_n_0
+    SLICE_X65Y130                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[873]_i_1/CI
+    SLICE_X65Y130        CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.313    10.234 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/u_asm/m_im_flat_reg[873]_i_1/O[3]
+                         net (fo=1, routed)           0.000    10.234    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[873]_0[239]
+    SLICE_X65Y130        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[873]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      5.000     5.000 r  
+    E3                                                0.000     5.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     5.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.411     6.411 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           1.920     8.331    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.091     8.422 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.683    10.105    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.694     6.411 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           1.923     8.334    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.091     8.425 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.488     9.913    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X65Y130        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[873]/C
+                         clock pessimism              0.257    10.170    
+                         clock uncertainty           -0.067    10.104    
+    SLICE_X65Y130        FDRE (Setup_fdre_C_D)        0.062    10.166    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/m_im_flat_reg[873]
+  -------------------------------------------------------------------
+                         required time                         10.166    
+                         arrival time                         -10.234    
+  -------------------------------------------------------------------
+                         slack                                 -0.068    
+
+Slack (VIOLATED) :        -0.037ns  (required time - arrival time)
+  Source:                 cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpab_im_reg[20][1]/C
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Destination:            cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][23]/D
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Path Group:             clk_out3_cnn_accelerator_system_clk_wiz_0_0
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            5.000ns  (clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@5.000ns - clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@0.000ns)
+  Data Path Delay:        4.835ns  (logic 2.023ns (41.839%)  route 2.812ns (58.161%))
+  Logic Levels:           7  (CARRY4=6 LUT2=1)
+  Clock Path Skew:        0.114ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    5.149ns = ( 10.149 - 5.000 ) 
+    Source Clock Delay      (SCD):    5.221ns
+    Clock Pessimism Removal (CPR):    0.186ns
+  Clock Uncertainty:      0.067ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.113ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      0.000     0.000 r  
+    E3                                                0.000     0.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     0.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.482     1.482 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           2.025     3.506    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.096     3.602 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.809     5.412    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.922     1.490 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           2.018     3.508    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.096     3.604 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.617     5.221    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X67Y110        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpab_im_reg[20][1]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X67Y110        FDRE (Prop_fdre_C_Q)         0.456     5.677 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpab_im_reg[20][1]/Q
+                         net (fo=2, routed)           1.250     6.928    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpab_im_reg[20]_550[1]
+    SLICE_X70Y133                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q[20][3]_i_4/I0
+    SLICE_X70Y133        LUT2 (Prop_lut2_I0_O)        0.124     7.052 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q[20][3]_i_4/O
+                         net (fo=1, routed)           0.480     7.531    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q[20][3]_i_4_n_0
+    SLICE_X69Y139                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][3]_i_1/S[1]
+    SLICE_X69Y139        CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.674     8.205 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][3]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.205    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][3]_i_1_n_0
+    SLICE_X69Y140                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][7]_i_1/CI
+    SLICE_X69Y140        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     8.319 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][7]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.319    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][7]_i_1_n_0
+    SLICE_X69Y141                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][11]_i_1/CI
+    SLICE_X69Y141        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     8.433 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][11]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.433    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][11]_i_1_n_0
+    SLICE_X69Y142                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][15]_i_1/CI
+    SLICE_X69Y142        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     8.547 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][15]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.547    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][15]_i_1_n_0
+    SLICE_X69Y143                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][19]_i_1/CI
+    SLICE_X69Y143        CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.114     8.661 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][19]_i_1/CO[3]
+                         net (fo=1, routed)           0.000     8.661    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][19]_i_1_n_0
+    SLICE_X69Y144                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][23]_i_1/CI
+    SLICE_X69Y144        CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.313     8.974 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][23]_i_1/O[3]
+                         net (fo=1, routed)           1.082    10.056    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim[20]_784[23]
+    SLICE_X79Y151        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][23]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      5.000     5.000 r  
+    E3                                                0.000     5.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     5.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.411     6.411 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           1.920     8.331    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.091     8.422 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.683    10.105    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.694     6.411 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           1.923     8.334    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.091     8.425 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.724    10.149    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X79Y151        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][23]/C
+                         clock pessimism              0.186    10.335    
+                         clock uncertainty           -0.067    10.269    
+    SLICE_X79Y151        FDRE (Setup_fdre_C_D)       -0.249    10.020    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gpim_q_reg[20][23]
+  -------------------------------------------------------------------
+                         required time                         10.020    
+                         arrival time                         -10.056    
+  -------------------------------------------------------------------
+                         slack                                 -0.037    
+
+Slack (VIOLATED) :        -0.032ns  (required time - arrival time)
+  Source:                 cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/tile6_q_reg[1916]/C
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Destination:            cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_reg[2][5][10]/D
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Path Group:             clk_out3_cnn_accelerator_system_clk_wiz_0_0
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            5.000ns  (clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@5.000ns - clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@0.000ns)
+  Data Path Delay:        4.990ns  (logic 1.898ns (38.039%)  route 3.092ns (61.961%))
+  Logic Levels:           6  (CARRY4=2 LUT3=2 LUT5=1 LUT6=1)
+  Clock Path Skew:        -0.038ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    4.934ns = ( 9.934 - 5.000 ) 
+    Source Clock Delay      (SCD):    5.231ns
+    Clock Pessimism Removal (CPR):    0.259ns
+  Clock Uncertainty:      0.067ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.113ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      0.000     0.000 r  
+    E3                                                0.000     0.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     0.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.482     1.482 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           2.025     3.506    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.096     3.602 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.809     5.412    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.922     1.490 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           2.018     3.508    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.096     3.604 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.626     5.231    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X58Y89         FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/tile6_q_reg[1916]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X58Y89         FDRE (Prop_fdre_C_Q)         0.518     5.749 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/tile6_q_reg[1916]/Q
+                         net (fo=2, routed)           1.124     6.873    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/Q[476]
+    SLICE_X67Y93                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/i___37_i_2__2/I0
+    SLICE_X67Y93         LUT3 (Prop_lut3_I0_O)        0.124     6.997 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/i___37_i_2__2/O
+                         net (fo=9, routed)           0.923     7.919    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/gic[3].d_flat_ic[236]
+    SLICE_X67Y93                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/i___37/I1
+    SLICE_X67Y93         LUT3 (Prop_lut3_I1_O)        0.124     8.043 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/i___37/O
+                         net (fo=4, routed)           0.593     8.636    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/i___37_n_0
+    SLICE_X63Y95                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre[2][5][7]_i_4__2/I3
+    SLICE_X63Y95         LUT5 (Prop_lut5_I3_O)        0.124     8.760 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre[2][5][7]_i_4__2/O
+                         net (fo=2, routed)           0.452     9.212    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre[2][5][7]_i_4__2_n_0
+    SLICE_X63Y93                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre[2][5][7]_i_8__2/I0
+    SLICE_X63Y93         LUT6 (Prop_lut6_I0_O)        0.124     9.336 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre[2][5][7]_i_8__2/O
+                         net (fo=1, routed)           0.000     9.336    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre[2][5][7]_i_8__2_n_0
+    SLICE_X63Y93                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_reg[2][5][7]_i_1__2/S[1]
+    SLICE_X63Y93         CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.550     9.886 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_reg[2][5][7]_i_1__2/CO[3]
+                         net (fo=1, routed)           0.000     9.886    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_reg[2][5][7]_i_1__2_n_0
+    SLICE_X63Y94                                                      r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_reg[2][5][10]_i_1__2/CI
+    SLICE_X63Y94         CARRY4 (Prop_carry4_CI_O[1])
+                                                      0.334    10.220 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_reg[2][5][10]_i_1__2/O[1]
+                         net (fo=1, routed)           0.000    10.220    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_c[2][5]_1203[10]
+    SLICE_X63Y94         FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_reg[2][5][10]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      5.000     5.000 r  
+    E3                                                0.000     5.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     5.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.411     6.411 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           1.920     8.331    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.091     8.422 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.683    10.105    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.694     6.411 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           1.923     8.334    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.091     8.425 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.508     9.934    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/clk
+    SLICE_X63Y94         FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_reg[2][5][10]/C
+                         clock pessimism              0.259    10.193    
+                         clock uncertainty           -0.067    10.126    
+    SLICE_X63Y94         FDRE (Setup_fdre_C_D)        0.062    10.188    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[3].u_it/tre_reg[2][5][10]
+  -------------------------------------------------------------------
+                         required time                         10.188    
+                         arrival time                         -10.220    
+  -------------------------------------------------------------------
+                         slack                                 -0.032    
+
+Slack (VIOLATED) :        -0.023ns  (required time - arrival time)
+  Source:                 cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/tile6_q_reg[852]/C
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Destination:            cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_reg[1][1][10]/D
+                            (rising edge-triggered cell FDRE clocked by clk_out3_cnn_accelerator_system_clk_wiz_0_0  {rise@0.000ns fall@2.500ns period=5.000ns})
+  Path Group:             clk_out3_cnn_accelerator_system_clk_wiz_0_0
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            5.000ns  (clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@5.000ns - clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise@0.000ns)
+  Data Path Delay:        4.970ns  (logic 1.898ns (38.191%)  route 3.072ns (61.809%))
+  Logic Levels:           6  (CARRY4=2 LUT3=2 LUT5=1 LUT6=1)
+  Clock Path Skew:        -0.049ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    4.928ns = ( 9.928 - 5.000 ) 
+    Source Clock Delay      (SCD):    5.234ns
+    Clock Pessimism Removal (CPR):    0.257ns
+  Clock Uncertainty:      0.067ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.113ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      0.000     0.000 r  
+    E3                                                0.000     0.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     0.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.482     1.482 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           2.025     3.506    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.096     3.602 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.809     5.412    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.922     1.490 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           2.018     3.508    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.096     3.604 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.630     5.234    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/clk
+    SLICE_X14Y109        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/tile6_q_reg[852]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X14Y109        FDRE (Prop_fdre_C_Q)         0.518     5.752 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/tile6_q_reg[852]/Q
+                         net (fo=1, routed)           1.126     6.878    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/Q[212]
+    SLICE_X32Y111                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/i___30_i_3__1/I2
+    SLICE_X32Y111        LUT3 (Prop_lut3_I2_O)        0.124     7.002 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/i___30_i_3__1/O
+                         net (fo=6, routed)           0.598     7.600    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/gic[2].d_flat_ic[108]
+    SLICE_X36Y111                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/i___30/I2
+    SLICE_X36Y111        LUT3 (Prop_lut3_I2_O)        0.124     7.724 f  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/i___30/O
+                         net (fo=4, routed)           0.681     8.405    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/i___30_n_0
+    SLICE_X37Y111                                                     f  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre[1][1][7]_i_4__1/I3
+    SLICE_X37Y111        LUT5 (Prop_lut5_I3_O)        0.124     8.529 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre[1][1][7]_i_4__1/O
+                         net (fo=2, routed)           0.667     9.196    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre[1][1][7]_i_4__1_n_0
+    SLICE_X28Y112                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre[1][1][7]_i_8__1/I0
+    SLICE_X28Y112        LUT6 (Prop_lut6_I0_O)        0.124     9.320 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre[1][1][7]_i_8__1/O
+                         net (fo=1, routed)           0.000     9.320    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre[1][1][7]_i_8__1_n_0
+    SLICE_X28Y112                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_reg[1][1][7]_i_1__1/S[1]
+    SLICE_X28Y112        CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.550     9.870 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_reg[1][1][7]_i_1__1/CO[3]
+                         net (fo=1, routed)           0.000     9.870    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_reg[1][1][7]_i_1__1_n_0
+    SLICE_X28Y113                                                     r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_reg[1][1][10]_i_1__1/CI
+    SLICE_X28Y113        CARRY4 (Prop_carry4_CI_O[1])
+                                                      0.334    10.204 r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_reg[1][1][10]_i_1__1/O[1]
+                         net (fo=1, routed)           0.000    10.204    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_c[1][1]_1127[10]
+    SLICE_X28Y113        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_reg[1][1][10]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk_out3_cnn_accelerator_system_clk_wiz_0_0 rise edge)
+                                                      5.000     5.000 r  
+    E3                                                0.000     5.000 r  CLK100MHZ (IN)
+                         net (fo=0)                   0.000     5.000    CLK100MHZ
+    E3                                                                r  CLK100MHZ_IBUF_inst/I
+    E3                   IBUF (Prop_ibuf_I_O)         1.411     6.411 r  CLK100MHZ_IBUF_inst/O
+                         net (fo=1, routed)           1.920     8.331    cnn_accelerator_system_i/util_ds_buf_0/U0/BUFG_I[0]
+    BUFGCTRL_X0Y16                                                    r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/I
+    BUFGCTRL_X0Y16       BUFG (Prop_bufg_I_O)         0.091     8.422 r  cnn_accelerator_system_i/util_ds_buf_0/U0/USE_BUFG.GEN_BUFG[0].BUFG_U/O
+                         net (fo=2, routed)           1.683    10.105    cnn_accelerator_system_i/clk_wiz_0/inst/clk_in1
+    MMCME2_ADV_X0Y0                                                   r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKIN1
+    MMCME2_ADV_X0Y0      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT2)
+                                                     -3.694     6.411 r  cnn_accelerator_system_i/clk_wiz_0/inst/mmcm_adv_inst/CLKOUT2
+                         net (fo=1, routed)           1.923     8.334    cnn_accelerator_system_i/clk_wiz_0/inst/clk_out3_cnn_accelerator_system_clk_wiz_0_0
+    BUFGCTRL_X0Y2                                                     r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/I
+    BUFGCTRL_X0Y2        BUFG (Prop_bufg_I_O)         0.091     8.425 r  cnn_accelerator_system_i/clk_wiz_0/inst/clkout3_buf/O
+                         net (fo=53115, routed)       1.503     9.928    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/clk
+    SLICE_X28Y113        FDRE                                         r  cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_reg[1][1][10]/C
+                         clock pessimism              0.257    10.185    
+                         clock uncertainty           -0.067    10.119    
+    SLICE_X28Y113        FDRE (Setup_fdre_C_D)        0.062    10.181    cnn_accelerator_system_i/cnn_accelerator_wino_0/inst/conv2/gic[2].u_it/tre_reg[1][1][10]
+  -------------------------------------------------------------------
+                         required time                         10.181    
+                         arrival time                         -10.204    
+  -------------------------------------------------------------------
+                         slack                                 -0.023    
+
+
+
+

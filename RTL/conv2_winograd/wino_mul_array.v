@@ -2,181 +2,142 @@
 //////////////////////////////////////////////////////////////////////////////////
 // Module Name: wino_mul_array
 // Description:
-//   복소수 Winograd element-wise mul array — 184 DSP (4 lane × 46), 한 (OC,tile) 의
-//   M = Σ_IC U⊙V 를 2-cycle(4 IC + 4 IC) 로 계산. drop-in 핵심 compute.
+//   복소수 Winograd element-wise mul array — 46 DSP, 1 lane(=1 IC 그룹) 단위.
+//   conv2_winograd_engine 이 본 모듈을 **4개 인스턴스**(lane[0..3])하고,
+//   cross-lane(4 IC) 누적·m_assemble 은 engine 쪽에서 수행한다.
 //
-//   lane L (= IC) : 46 DSP. operand i 의 weight=w_flat[(L*46+i)], act=a_flat[(L*46+i)].
-//     real pos(0..15): prod 그대로. cmul pos(16..): Gauss(k1,k2,k3) → wino_lane_reduce.
-//   cross-lane: 4 lane partial 합 = 한 group(4 IC) partial.
-//   accumulate: grp0 cycle load → grp1 cycle add (= 8 IC) → wino_m_assemble(켤레유도)
-//               → full 6×6 M (m_re_flat/m_im_flat) + m_valid.
+//   "lane 에 local 인 모든 것"을 한 계층으로 묶음 (pblock/LOC 핸들):
 //
-//   파이프라인 (en 연속 가정, image 경계서 en=0 → 자동 refill):
-//     issue T : w/a/grp_in 제시 (DSP CE=en)
-//     T+3     : prod valid → lane_reduce(조합) → ★G-1 lpre_q/lpim_q (lane-local reg)
-//     T+4     : cross-lane 4-add(조합) → gpre_q/gpim_q (C-1 reg)
-//     T+5     : msum/m_assemble(조합) → grp0 → acc<=gp ; grp1 → M latch, m_valid<=1
-//               grp_pipe[4]/vld_pipe[4] 가 issue@T 의 grp/valid 와 정렬
-//     ⇒ (OC,tile) 하나당 m_valid 1회. 연속 issue 시 2-cycle 간격.
-//   ★ G-1 (200MHz gather 분할): [184 DSP PREG → lane_reduce 수렴] 과 [4-lane 합] 이
-//     한 cycle 에 있던 것을 lane-local register 로 분리 — die-spanning 수렴 net 이
-//     adder chain 과 직렬로 합산되던 것을 해소. +1 latency (throughput 불변).
+//     a_flat (입력변환 stage2 comb) ──→ [a_q  ★2a lane activation register]
+//                                           │ (B-port)
+//     wm_* (loader, startup) ──→ [per-PE wmem 32×UW 분산RAM ×46 + w_q_op→op2→op3]
+//                                           │ (A-port, a_q 와 +3 정렬)
+//                                   [46 × wino_dsp_mul (DSP48E1 3-stage)]
+//                                           │ prod
+//                                   [wino_lane_reduce: 46 prod → 26 partial (Gauss)]
+//                                           │
+//                                   [pre_q/pim_q  ★G-1 lane-local register]
 //
-//   ★ en 이 0→1 (새 image burst) 시 vld_pipe/grp_pipe 를 0 으로 두어, DSP 파이프의
-//     직전 image 잔여(stale) 3-cycle 을 invalid 로 마스킹 (accumulator 무시) 후 refill.
-//   ★ Vivado: dsp48e1_model.v 제외 (실제 DSP48E1). wino_lane_reduce/m_assemble 는 자동생성.
+//   - 모든 fabric register 는 reset/CE-free(free-run) — 소비는 engine 의 vld_pipe 가
+//     게이트 (control set 최소화, Place 30-487 교훈). DSP 내부만 en(CE) 사용.
+//   - weight write: 전역 operand index wm_op(0..183) 비교로 자기 lane 분(LANE*46+i)만
+//     수신 (startup-only narrow write).
+//   - slot 역할(real/cmul Gauss)은 canonical 순서가 결정 — 하드웨어는 전부 동일
+//     곱셈기 (docs/winograd/conv2_winograd_design.md §4).
+//   - 물리 제어 핸들: lane 단위 pblock 은
+//       add_cells_to_pblock pb_laneN [get_cells {.../conv2/lane[N].u_mul}]
 //////////////////////////////////////////////////////////////////////////////////
 
 module wino_mul_array #(
-    parameter integer UW = 14,    // weight operand (A-port)
-    parameter integer VW = 16,    // activation operand (B-port)
-    parameter integer PW = 32,    // DSP product
-    parameter integer MW = 32     // M accumulator
+    parameter integer LANE = 0,    // 0..3 (grp0: IC=LANE, grp1: IC=LANE+4)
+    parameter integer UW   = 12,   // weight operand (A-port)
+    parameter integer VW   = 14,   // activation operand (B-port)
+    parameter integer PW   = 24,   // DSP product
+    parameter integer MW   = 25    // lane partial / M
 )(
-    input  wire                clk,
-    input  wire                rst,        // active-high synchronous
-    input  wire                en,         // compute burst active (DSP CE)
-    input  wire                grp_in,     // 0/1 : 이번 cycle issue 하는 IC-group
+    input  wire               clk,
+    input  wire               rst,        // DSP 내부 reg 용 (fabric reg 는 reset-free)
+    input  wire               en,         // DSP CE (mul_en_q3 정렬)
 
-    input  wire [4*46*UW-1:0]  w_flat,     // lane L op i = [(L*46+i)*UW +: UW] (signed)
-    input  wire [4*46*VW-1:0]  a_flat,     // lane L op i = [(L*46+i)*VW +: VW] (signed)
+    // weight load (startup, narrow — wino_weight_loader 직결)
+    input  wire               wm_we,
+    input  wire [4:0]         wm_addr,    // entry(sel) 0..31
+    input  wire [7:0]         wm_op,      // 전역 operand 0..183
+    input  wire [UW-1:0]      wm_data,
 
-    output reg  [36*MW-1:0]    m_re_flat,  // M[p][q] = [(p*6+q)*MW +: MW] (signed)
-    output reg  [36*MW-1:0]    m_im_flat,
-    output reg                 m_valid     // M(한 OC,tile) 완성 pulse
+    // weight read addr (engine 의 lockstep 4-copy 중 자기 lane 분, issue+0 정렬)
+    input  wire [4:0]         rd_sel,
+
+    // activation: 입력변환 stage2 comb 출력 (이 lane 의 46 operand)
+    input  wire [46*VW-1:0]   a_flat,
+
+    // lane partial (Gauss reduce 후 lane-local register 출력)
+    output wire [26*MW-1:0]   pre_q_flat,
+    output wire [26*MW-1:0]   pim_q_flat
 );
 
-    //==========================================================================
-    // 1. 184 DSP (4 lane × 46) + lane_reduce
-    //==========================================================================
-    wire signed [MW-1:0] gpre [0:25];   // cross-lane(4 IC) partial re
-    wire signed [MW-1:0] gpim [0:25];   //                          im
+    //--------------------------------------------------------------------------
+    // ★2a lane activation register: [stage2→a_q] | [a_q→46 DSP BREG] 분할.
+    //--------------------------------------------------------------------------
+    reg [46*VW-1:0] a_q;
+    always @(posedge clk) a_q <= a_flat;
 
-    genvar L, i, k;
-    generate
-        for (L = 0; L < 4; L = L + 1) begin : lane
-            wire [46*PW-1:0] pflat;
-            for (i = 0; i < 46; i = i + 1) begin : dsp
-                wire signed [PW-1:0] pw;
-                wino_dsp_mul #(.AW(UW), .BW(VW), .PW(PW)) u_dsp (
-                    .clk (clk), .rst (rst), .en (en),
-                    .a   ($signed(w_flat[(L*46+i)*UW +: UW])),
-                    .b   ($signed(a_flat[(L*46+i)*VW +: VW])),
-                    .p   (pw)
-                );
-                assign pflat[i*PW +: PW] = pw;
-            end
-            wire [26*MW-1:0] lpre, lpim;
-            wino_lane_reduce #(.PW(PW), .MW(MW)) u_lr (
-                .prod_flat (pflat),
-                .pre_flat  (lpre),
-                .pim_flat  (lpim)
-            );
-            // ★ G-1: lane-local partial register — [PREG→lane_reduce 수렴] |
-            //   [cross-lane 합] 분할. placer 가 lane 46-DSP 군집 근처에 두도록
-            //   connectivity 로 유도. reset-free(데이터, vld_pipe 가 마스킹).
-            reg [26*MW-1:0] lpre_q, lpim_q;
-            always @(posedge clk) if (en) begin
-                lpre_q <= lpre;
-                lpim_q <= lpim;
-            end
+    //--------------------------------------------------------------------------
+    // loader write +1 재타이밍 (lane-local): 중앙 loader → 4 lane×46 RAM 의
+    //   die-spanning write 버스(WADR/I/WE)가 routed 에서 −1.40 (~1.2K EP).
+    //   startup-only 지만 STA 는 모름 → lane 입구에서 1단 register.
+    //   ★ keep 필수: 4 lane 이 같은 신호를 등가 register → keep 없으면 합성이
+    //     1벌로 merge 해 die-spanning 버스가 부활 (routed 실측 −0.417 worst,
+    //     lane[0] reg → lane[1] RAM/WE). compute_cnt_l 4-copy 와 동일 함정.
+    //--------------------------------------------------------------------------
+    // mf 16→4 (routed run5: lane 내 wm_op_q→RAM WE 가 route 84% −0.13 잔존 —
+    //   startup-only 라 복제 비용 무관, lane 의 46 RAM 군집별 출발점 증설)
+    (* keep = "true", max_fanout = 4 *) reg          wm_we_q;
+    (* keep = "true", max_fanout = 4 *) reg [4:0]    wm_addr_q;
+    (* keep = "true", max_fanout = 4 *) reg [7:0]    wm_op_q;
+    (* keep = "true", max_fanout = 4 *) reg [UW-1:0] wm_data_q;
+    always @(posedge clk) begin
+        if (rst) wm_we_q <= 1'b0;
+        else     wm_we_q <= wm_we;
+        wm_addr_q <= wm_addr;
+        wm_op_q   <= wm_op;
+        wm_data_q <= wm_data;
+    end
+
+    //--------------------------------------------------------------------------
+    // per-PE weight: 32×UW 분산 RAM + L=1 read + 정렬 3단 (w_q_op4 = a_q 와 동일
+    //   +4 → DSP A/B 동시 capture).  write 는 wm_op 비교 demux (startup-only).
+    //   ★ shreg_extract="no": op→op2→op3→op4 가 SRL16 로 합쳐지면(routed 실측
+    //     w_q_op2_srl2, −1.42) 물리적 재배치 자유도가 사라짐 — FF 로 강제해
+    //     placer 가 [RAM→DSP] 경로를 따라 단을 펼치게 함.
+    //--------------------------------------------------------------------------
+    wire [46*UW-1:0] w_q;
+    genvar gi;
+    generate for (gi = 0; gi < 46; gi = gi + 1) begin : g_wpe
+        (* ram_style = "distributed" *)
+        reg [UW-1:0] wmem_op [0:31];
+        (* shreg_extract = "no" *) reg [UW-1:0] w_q_op, w_q_op2, w_q_op3, w_q_op4;
+        always @(posedge clk) begin
+            if (wm_we_q && (wm_op_q == LANE*46 + gi)) wmem_op[wm_addr_q] <= wm_data_q;
+            w_q_op  <= wmem_op[rd_sel];
+            w_q_op2 <= w_q_op;
+            w_q_op3 <= w_q_op2;
+            w_q_op4 <= w_q_op3;     // +1 (입력변환 3-stage 화 — a_q 와 동일 +4 정렬)
         end
-    endgenerate
+        assign w_q[gi*UW +: UW] = w_q_op4;
+    end endgenerate
 
-    //==========================================================================
-    // 2. cross-lane 합 (4 IC) — 조합 (★G-1: lane register 출력 기준)
-    //==========================================================================
-    generate
-        for (k = 0; k < 26; k = k + 1) begin : xlane
-            assign gpre[k] = $signed(lane[0].lpre_q[k*MW +: MW])
-                           + $signed(lane[1].lpre_q[k*MW +: MW])
-                           + $signed(lane[2].lpre_q[k*MW +: MW])
-                           + $signed(lane[3].lpre_q[k*MW +: MW]);
-            assign gpim[k] = $signed(lane[0].lpim_q[k*MW +: MW])
-                           + $signed(lane[1].lpim_q[k*MW +: MW])
-                           + $signed(lane[2].lpim_q[k*MW +: MW])
-                           + $signed(lane[3].lpim_q[k*MW +: MW]);
-        end
-    endgenerate
+    //--------------------------------------------------------------------------
+    // 46 DSP
+    //--------------------------------------------------------------------------
+    wire [46*PW-1:0] pflat;
+    generate for (gi = 0; gi < 46; gi = gi + 1) begin : dsp
+        wire signed [PW-1:0] pw;
+        wino_dsp_mul #(.AW(UW), .BW(VW), .PW(PW)) u_dsp (
+            .clk (clk), .rst (rst), .en (en),
+            .a   ($signed(w_q[gi*UW +: UW])),
+            .b   ($signed(a_q[gi*VW +: VW])),
+            .p   (pw)
+        );
+        assign pflat[gi*PW +: PW] = pw;
+    end endgenerate
 
-    //==========================================================================
-    // 3. IC accumulator (grp0 load / grp1 add) + 켤레유도 (wino_m_assemble)
-    //==========================================================================
-    reg signed [MW-1:0] acc_re [0:25];
-    reg signed [MW-1:0] acc_im [0:25];
-    // ★ C-1: cross-lane 합을 register(gp_reg) → reduce chain 을 분할 (+1 latency).
-    //   msum/acc 는 gp_reg 사용. (G-1 lane reg 와 합쳐 reduce 전체가 3-stage.)
-    reg signed [MW-1:0] gpre_q [0:25];
-    reg signed [MW-1:0] gpim_q [0:25];
-
-    // msum = acc + gp_reg  (grp1 cycle 에 8-IC 합 = 완성 M)
-    wire [26*MW-1:0] msum_re_flat;
-    wire [26*MW-1:0] msum_im_flat;
-    generate
-        for (k = 0; k < 26; k = k + 1) begin : msum
-            assign msum_re_flat[k*MW +: MW] = acc_re[k] + gpre_q[k];
-            assign msum_im_flat[k*MW +: MW] = acc_im[k] + gpim_q[k];
-        end
-    endgenerate
-
-    wire [36*MW-1:0] asm_re_flat;
-    wire [36*MW-1:0] asm_im_flat;
-    wino_m_assemble #(.MW(MW)) u_asm (
-        .sre_flat (msum_re_flat),
-        .sim_flat (msum_im_flat),
-        .mre_flat (asm_re_flat),
-        .mim_flat (asm_im_flat)
+    //--------------------------------------------------------------------------
+    // lane reduce (Gauss k1±k2/k3, 고정 배선) + ★G-1 lane-local register
+    //--------------------------------------------------------------------------
+    wire [26*MW-1:0] lpre, lpim;
+    wino_lane_reduce #(.PW(PW), .MW(MW)) u_lr (
+        .prod_flat (pflat),
+        .pre_flat  (lpre),
+        .pim_flat  (lpim)
     );
 
-    // grp/valid 를 (DSP 3 + lane reg 1(G-1) + cross-lane reg 1(C-1) = 5) 만큼 지연 → stage5 정렬
-    reg [4:0] grp_pipe;
-    reg [4:0] vld_pipe;
-
-    integer kk;
+    reg [26*MW-1:0] pre_q, pim_q;
     always @(posedge clk) begin
-        if (rst) begin
-            grp_pipe  <= 5'b0;
-            vld_pipe  <= 5'b0;
-            m_valid   <= 1'b0;
-            m_re_flat <= {36*MW{1'b0}};
-            m_im_flat <= {36*MW{1'b0}};
-            for (kk = 0; kk < 26; kk = kk + 1) begin
-                acc_re[kk] <= {MW{1'b0}};
-                acc_im[kk] <= {MW{1'b0}};
-                gpre_q[kk] <= {MW{1'b0}};
-                gpim_q[kk] <= {MW{1'b0}};
-            end
-        end else if (en) begin
-            grp_pipe <= {grp_pipe[3:0], grp_in};
-            vld_pipe <= {vld_pipe[3:0], 1'b1};
-            for (kk = 0; kk < 26; kk = kk + 1) begin   // ★ C-1: cross-lane 합 register
-                gpre_q[kk] <= gpre[kk];
-                gpim_q[kk] <= gpim[kk];
-            end
-
-            if (vld_pipe[4]) begin
-                if (grp_pipe[4] == 1'b0) begin
-                    // grp0 : 첫 4 IC partial 적재 (registered gp)
-                    for (kk = 0; kk < 26; kk = kk + 1) begin
-                        acc_re[kk] <= gpre_q[kk];
-                        acc_im[kk] <= gpim_q[kk];
-                    end
-                    m_valid <= 1'b0;
-                end else begin
-                    // grp1 : 나머지 4 IC 합산 → 완성 M latch
-                    m_re_flat <= asm_re_flat;
-                    m_im_flat <= asm_im_flat;
-                    m_valid   <= 1'b1;
-                end
-            end else begin
-                m_valid <= 1'b0;
-            end
-        end else begin
-            // en=0 (image 경계 등) : 파이프 clear → 다음 burst 가 stale DSP 잔여 마스킹 후 refill
-            grp_pipe <= 5'b0;
-            vld_pipe <= 5'b0;
-            m_valid  <= 1'b0;
-        end
+        pre_q <= lpre;
+        pim_q <= lpim;
     end
+    assign pre_q_flat = pre_q;
+    assign pim_q_flat = pim_q;
 
 endmodule

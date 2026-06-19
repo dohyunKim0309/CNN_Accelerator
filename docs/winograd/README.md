@@ -25,10 +25,13 @@ conv2 만 Winograd 하면 **conv1(1634 cyc)이 새 bottleneck** 이 되어 이�
 
 | 경로 | 내용 | 상태 |
 |---|---|---|
-| `RTL/conv2_winograd/` | Winograd conv2 engine (184 DSP). conv2 동일 외부 인터페이스(drop-in) + **weight=PS pre-transformed U**(wino_weight_bram BMG + loader) | ✅ **engine iverilog bit-exact** (40/40+100/100, **1337 cyc/img** steady-state). A 폭축소+PS weight 적용(2026-06-05). cycle표 `conv2_winograd_timing.md` |
+| `RTL/conv2_winograd/` | Winograd conv2 engine (184 DSP). conv2 동일 외부 인터페이스(drop-in) + **weight=PS pre-transformed U**(wino_weight_bram BMG + loader) | ✅ **engine iverilog bit-exact** (100/100). 현행 **1348 cyc/img**(overclock baseline; bisect 은 revert=Iter15). cycle표=`conv2_winograd_timing.md`, 동작/anchor=`conv2_winograd_engine_arch.md` |
 | `RTL/conv1_2x/` | conv1 DSP 2배(18→36, 1-round) rebalance. conv2-wino bottleneck 매칭용 | ✅ 완료 (40/40, 다른 에이전트) |
 | `docs/winograd/algorithm_complex_f43.md` | 알고리즘 도출·검증·행렬(§9.1 정정판)·§8 HW 아키텍처 | ✅ 완성 |
 | `docs/winograd/conv2_winograd_design.md` | **RTL 구현 설계서**(모듈 분해/인터페이스/dataflow/DSP 매핑/cycle/검증) | ✅ as-built 반영(baked ROM/1336/PDRAIN) |
+| `docs/winograd/conv2_winograd_engine_arch.md` | **현행 동작 가이드**(overclock 後): cycle-exact 파이프라인 + **latency anchor**(baseline m_valid=issue+11/tag15; ❗top 배너 참조) + `m_assemble` HW 매핑 + **안전수정 gate**. design=설계청사진 ↔ arch=현행+수정안전 | ✅ baseline (bisect revert) |
+| `docs/winograd/conv2_winograd_timing.md` | **절대 cycle-by-cycle 다이어그램**(baseline m_valid=2oc+12, 1348; ❗top 배너) + handshake/ping-pong/PDRAIN/row_buffers/FSM 구조 | ✅ baseline (bisect revert) |
+| `docs/winograd/winograd_overclock_journey.md` | **overclock 진행기록**(Iter 0~15, **결산**) + 정적 catalog §A | ✅ **Iter 15: 200불가 확정→171.43MHz** (floorplan 사망·bisect revert·188=snap) |
 | `docs/winograd/conv1_2x_design.md` | conv1 rebalance 설계 | phase 2 |
 | `scripts/golden_sim/1_complex_winograd_f(4,3).py` | **bit-exact golden** (전체 10000장 검증 완료). RTL 검증 기준 | ✅ 완성 |
 | `scripts/weights/winograd_gen.py` | golden hw_model + transform/lane_reduce/m_assemble 자동생성 + **pre-transformed U weight hex/header**(`winograd_u.hex`/`conv2_winograd_weights.h`) + `relu_bounds()`(A 폭) | ✅ |

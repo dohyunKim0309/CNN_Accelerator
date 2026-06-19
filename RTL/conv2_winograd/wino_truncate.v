@@ -22,7 +22,9 @@ module wino_truncate #(
     input  wire              rst,        // active-high synchronous
     input  wire              en,
     input  wire [N*YW-1:0]   y16_flat,   // 채널 i = [i*YW +: YW] (signed)
-    output reg  [N*8-1:0]    out_flat    // 채널 i = [i*8 +: 8]
+    // ★ max_fanout: out_flat 1bit → tile_out 32 FF(2bank×16oc) 산포 (routed −1.38,
+    //   950 EP) → driver 복제로 collector cluster 근처 출발
+    (* max_fanout = 16 *) output reg [N*8-1:0] out_flat   // 채널 i = [i*8 +: 8]
 );
     // post-shift 폭 = YW-SHIFT. saturate 비교는 충분폭(여기선 그대로 signed 비교).
     localparam integer SW = YW - SHIFT;   // 22

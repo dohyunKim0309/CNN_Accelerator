@@ -6,9 +6,8 @@
 //     conv2 weight = PS-writable pre-transformed U(winograd_u.hex, 5888 word) →
 //     c2w_* Port A(13-bit) 로 write.  나머지(input/conv1w/fcw/result) 는 baseline 과 동일.
 //
-//   ⚠ DUT module 이름은 baseline 과 동일한 `cnn_accelerator` → 반드시
-//     RTL/cnn_accelerator_winograd.v 를 source 로 포함(베이스라인 cnn_accelerator.v 제외).
-//     두 top 의 module 명이 같아 동시 추가 시 충돌.
+//   DUT module = `cnn_accelerator_winograd` (2026-06-12 모듈명=파일명 일치 —
+//     baseline `cnn_accelerator` 와 중복 없음, 같은 프로젝트 공존 가능).
 //
 //   PS 동작 emul:
 //     - weight 적재 : w1(conv1) / c2w(winograd U) / fcw Port A write (AXI BRAM Ctrl emul)
@@ -99,9 +98,10 @@ module tb_cnn_accelerator_winograd_multi;
     reg  [511:0] fcw_dina  = 512'd0;
 
     //==========================================================================
-    // DUT  (★ RTL/cnn_accelerator_winograd.v 의 module cnn_accelerator)
+    // DUT  (★ RTL/cnn_accelerator_winograd.v 의 module cnn_accelerator_winograd —
+    //        모듈명=파일명 일치, baseline 과 중복 없음)
     //==========================================================================
-    cnn_accelerator dut (
+    cnn_accelerator_winograd dut (
         .clk       (clk),
         .aclk      (clk),               // 단일클럭 TB: aclk=clk → CDC 동기화기는 동작(지연만), 기능 동일
         .resetn    (resetn),

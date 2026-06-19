@@ -1,5 +1,16 @@
 # Conv2 Winograd F(4,3) — RTL 타이밍 (cycle-by-cycle)
 
+> ❗ **2026-06-19 정정 — 아래 본문은 carry-bisect(+1) 값, 현행 RTL = baseline 이라 전부 −1**:
+> m_valid 2oc+13→**2oc+12**(= issue+11), tag16→**15**, tg_*[16]→**[15]**, 1349→**1348**,
+> truncate 2oc+18→**2oc+17**, tile_out 2oc+19→**2oc+18**, oc15 @43/@49→**@42/@48**, tail36→**35**.
+> bisect 은 churn 으로 revert(journey **Iter 15**). 최종 = **171.43MHz**(VCO=1200, baseline).
+
+> **현행 반영 (2026-06-15)**: overclock 파이프(IT **3-stage** / OT **4-stage** / gather 2+2 /
+> a_q) 로 datapath latency 가 깊어져 **m_valid = 2oc+13 (= grp1 issue +12), tag 16,
+> 1349 cyc/img**. 아래 cycle 표·다이어그램은 이를 반영(2026-06-04 판의 G+4/2oc+5/1336 → 정합 갱신).
+> **per-hop 파이프라인 anchor(상대) + 안전수정 규칙 = `conv2_winograd_engine_arch.md` §2.1/§5**
+> (중복 회피: 본 문서 = 절대 cycle·구조, arch = 상대 anchor·규칙·m_assemble 매핑).
+
 `conv2/conv2_timing.md` 의 winograd 판. **디버깅·타 에이전트 인수인계용 cycle 표**.
 알고리즘=`algorithm_complex_f43.md`(§9.1), 구현설계=`conv2_winograd_design.md`, bit-exact 정답=golden
 `scripts/golden_sim/1_complex_winograd_f(4,3).py` + hw_model `scripts/weights/winograd_gen.py`.
@@ -19,8 +30,8 @@
 >    → wide `wmem`(32 entry×184 op, `ram_style=block`). `wmem[sel] == 옛 ROM[sel]`(bit-identical,
 >    동일 operand 순서·L=1 read 타이밍) → **mul array 값·타이밍 불변 = 동작 보존**. 첫 start →
 >    **LOAD_WEIGHTS**(loader ~5888+drain cyc, 1회) → image loop. PS 가 `c2w_*` 로 5888 word write.
-> 결과: 표준 conv2 engine **40/40 bit-exact, steady-state 1337 cyc/img** (옛 ROM 1336±, 불변).
-> full pipeline(`tb_cnn_accelerator_multi`) **40/40 logit+readback, 1337 cyc/img**.
+> 결과(2026-06-05 시점, pre-overclock): conv2 engine **40/40 bit-exact, 1337 cyc/img** (옛 ROM 1336±).
+> full pipeline **40/40 logit+readback**. ※ 이후 overclock 파이프(IT3/OT4/gather)로 **현행 1349** (§9).
 
 ---
 
@@ -28,7 +39,7 @@
 
 8 IC×26×26 INT8 → 16 OC×24×24 INT8 conv 을 **6×6 tile(stride4) 36개**로 나눠,
 각 tile: `V=BᵀdB`(8 IC 입력변환, 곱셈기0) → `M=Σ_IC U⊙V`(184 DSP, 16 OC×2 group=32 cyc) →
-`Y16=AᵀMA`(출력변환, 곱셈기0) → `sat(Y16>>14)+ReLU` → c2pool. **1336 cyc/img 측정**(steady-state, wdone↔wdone 99/99 uniform; conv2 1798 대비 1.35×, DSP 184 vs 192).
+`Y16=AᵀMA`(출력변환, 곱셈기0) → `sat(Y16>>14)+ReLU` → c2pool. **1349 cyc/img 측정**(steady-state; conv2 1798 대비 **1.33×**, DSP 184 vs 192). ※ overclock 파이프 추가로 1336→**1349**(latency tail +13, throughput 불변).
 
 ---
 
@@ -39,11 +50,12 @@ c1c2 BMG (Port B, 64b=8IC, L=2)
    │  raster read (producer): rows[4ty..4ty+5] × cols[0..25]
 [wino_row_buffers]  2-set × 6 row × 26 col × 64b. ping-pong(tile-row 단위)         §6
    │  set_active 에서 tile(ty,tx) 6×6×8IC **comb 추출**(별도 tile_buf 없음 — §3)
-[wino_input_transform ×8]  (IC별) 6×6 INT8 → 46 activation operand (곱셈기0)        leaf✓
-   │  8 IC × 46 op  →  grp-mux (lane L = IC[grp*4+L])  →  a_flat(4 lane×46)
-[wino_mul_array]  184 DSP, 16 OC×2 grp=32 cyc, IC누적+켤레 → M(6×6 complex)         leaf✓
+[wino_input_transform ×4, 3-stage]  (IT-share: grp d-mux 로 8 IC→4 변환기 time-share)  leaf✓
+   │  4 IT × 46 op (★2a a_q lane reg)  →  a_flat(4 lane×46)  →  DSP B-port
+[wino_mul_array]  184 DSP(3-stage)+lane_reduce+pre_q(G-1), 16 OC×2 grp=32 cyc → M    leaf✓
    │  (weight: wmem[sel=oc*2+grp] → w_q 4 lane×46.  PS BMG+loader 조립, =옛 ROM)     leaf✓
-[wino_output_transform]  M(6×6 complex) → Y16(4×4 real, 곱셈기0)                    leaf✓
+   │  gather 2+2(gpab/gpcd)→gpre_q(C-1)→grp0/grp1 누적→m_assemble(켤레) → M(complex)
+[wino_output_transform 4-stage]  M(6×6 complex) → Y16(4×4 real, 곱셈기0)             leaf✓
    │
 [wino_truncate N=16]  sat(Y16>>14)+ReLU → INT8                                      leaf✓
    │  per-OC 16 값 → tile_out[2 bank][16 pixel][16 OC] 수집 (bank=tcol[0], §3)
@@ -56,7 +68,7 @@ c1c2 BMG (Port B, 64b=8IC, L=2)
 - **weight load 1회**: 첫 start → `LOAD_WEIGHTS`(wino_weight_loader ~5888+drain cyc) → wmem 조립 → image loop. (옛 ROM 안의 "load 없음"에서 복귀 — §갱신.)
 
 > ✅ **검증완료**: `TB/multi_img/tb_conv2_winograd_engine_multi.v` **40/40·100/100 bit-exact**
-> vs `data/multi_img/all_c2pool.hex` (winograd==direct). 측정 **1336 cyc/img** (steady-state; TB avg/img 1346 = 첫 image warmup 포함값).
+> vs `data/multi_img/all_c2pool.hex` (winograd==direct). 측정 **1349 cyc/img** (현행 overclock 파이프 반영; pre-overclock 은 1336).
 > ★ 발견·해결한 버그 = producer L=2 read drain (§5.1).
 
 ---
@@ -65,14 +77,17 @@ c1c2 BMG (Port B, 64b=8IC, L=2)
 
 | 경로 | latency | 비고 |
 |---|---|---|
+> ★ overclock 으로 datapath 가 깊어짐. 아래는 **절대 latency**(총합), per-hop 상대 anchor 분해는 arch §2.1.
+
+| 경로 | latency | 비고 |
+|---|---|---|
 | c1c2 addr → dout | 2 (L=2) | BMG output register |
-| row_buffer write → comb read (tile6) | 0 | reg array comb read (distributed/FF) |
-| tile6 → input_transform → a_flat | 0 | 조합 (tile_buf 레지스터 없음) |
-| **mul_array: (oc,grp) issue → product(P)** | **3** | DSP48E1 AREG+MREG+PREG |
-| **mul_array: grp1 issue(cyc G) → m_valid & M** | **G+4** | §2.1 (검증됨, tb_wino_mul_array) |
-| M → output_transform → Y16 | 0 | 조합 |
-| Y16 → wino_truncate out | 1 | en=m_valid 등록 |
-| truncate out → tile_out (collector reg) | 1 | ⇒ M→tile_out 총 **2** cyc |
+| tile6 comb read → tile6_q | 1 | rb→IT register (monolithic) |
+| d-mux → input_transform(★3-stage) → a_flat → a_q | 3+1 | IT 3-stage + ★2a a_q lane reg |
+| a_q → DSP(3-stage) → lane_reduce → pre_q → gather 2+2 → gpre_q | 3+3 | reduce 4-cycle 분할(G-1/C-1) |
+| **grp1 issue(cyc G) → m_valid & M** | **G+12** | 위 합 (옛 G+4; arch §2.1) |
+| M → output_transform(★4-stage) → Y16 | 4 | 옛 0(조합) — OT 파이프화 |
+| Y16 → truncate → tile_out (collector) | 2 | ⇒ **M→tile_out 총 6 cyc** (옛 2) |
 | tile_out → c2pool write (writer reg) | 1 | c2_we/addr/din 등록 |
 
 ### 2.1 mul_array issue → M 정렬 (★ FSM 가 의존)
@@ -84,12 +99,14 @@ issue 시퀀스 (compute cycle c=0..31): `oc=c>>1, grp=c&1, sel=c, grp_in=c[0]`.
 compute cyc :  0    1    2    3   ...  30   31
  (oc,grp)   : 0,0  0,1  1,0  1,1      15,0 15,1
  grp1@      :       1         3            31     ← grp1 issue cycle G
- m_valid@   :          ...G+4...            35    ← M(oc) valid (oc=0→5, oc=15→35)
+ m_valid@   :          ..G+12..             43    ← M(oc) valid (oc=0→13, oc=15→43)
 ```
 
-- grp0(c=2oc) → DSP product@(2oc+3), accumulator **load** acc.
-- grp1(c=2oc+1) → product@(2oc+4), accumulator **add**(=8IC) → `m_re_flat/m_im_flat` latch, `m_valid=1` @ **2oc+5** (= grp1 issue (2oc+1) + 4).
-- ⇒ M(oc) valid at compute cyc **2oc+5**: oc=0→5, oc=15→35. (마지막 issue c=31 → 마지막 M@35.)
+- grp0(c=2oc): accumulator **load** acc (IC0-3 partial).
+- grp1(c=2oc+1): accumulator **add**(=8IC) → `m_assemble`(켤레) → `m_re_flat/m_im_flat` latch,
+  `m_valid=1` @ **2oc+13** (= grp1 issue (2oc+1) + **12**; 옛 +4 → overclock 파이프
+  a_q/pre_q/gather2+2/gpre_q 로 +7 + ★carry-bisect +1 = +8 깊어짐, 상대 anchor 분해 = arch §2.1).
+- ⇒ M(oc) valid at compute cyc **2oc+13**: oc=0→13, oc=15→43. (마지막 issue c=31 → 마지막 M@43.)
 
 ---
 
@@ -102,18 +119,18 @@ set_active(row_buffer) 에서 tile(ty,tx) 6×6 를 **comb 추출**(tile6) → 8 
 | 단계 | 시점 (compute cyc) | 근거 |
 |---|---|---|
 | issue (oc,grp) | c = 0..31 | grp1(oc) @ c=2oc+1 |
-| `m_valid(oc)` + M latch | **2oc+5** | grp1 issue +4 (mul_array, §2.1) |
-| truncate(oc) out | 2oc+6 | wino_truncate en=m_valid (+1) |
-| `tile_out[bank][*][oc]` latch | **2oc+7** | collector reg (+1) |
+| `m_valid(oc)` + M latch | **2oc+13** | grp1 issue +12 (§2.1) |
+| truncate(oc) out | 2oc+18 | OT 4-stage + trunc (m_valid+5) |
+| `tile_out[bank][*][oc]` latch | **2oc+19** | collector +1 (coc=tg_*[16]) |
 
-- oc0: m_valid@5 → tile_out@7.  oc15: m_valid@35 → **tile_out@37 (= tile 완성)**.
-- 다음 tile issue 는 cyc 32 부터 **연속**(mul_array 파이프 안 비움) → tile 당 실효 **32 cyc**.
-  마지막 OC 의 M/output drain(@35,@37) 과 §4 write 는 다음 tile compute 그림자에 겹침.
+- oc0: m_valid@13 → tile_out@19.  oc15: m_valid@43 → **tile_out@49 (= tile 완성)**.
+- 다음 tile issue 는 cyc 32 부터 **연속**(파이프 안 비움) → tile 당 실효 **32 cyc**.
+  마지막 OC 의 M/output drain(@43,@49) 과 §4 write 는 다음 tile compute 그림자에 겹침.
 
 ### 3.1 tile_out 수집 상세 (collector)
 
-`m_valid` 마다 그 OC 의 M → output_transform(comb) → wino_truncate(N=16, 1cyc) → 다음 cyc collector
-가 `tile_out[bank][pix][oc]` 에 등록 (M→tile_out 총 2 cyc).
+`m_valid` 마다 그 OC 의 M → output_transform(★4-stage) → wino_truncate(N=16, 1cyc) → collector
+가 `tile_out[bank][pix][oc]` 에 등록 (M→tile_out 총 **6 cyc**: OT4+trunc1+coll1; coc=tg_*[16]).
 - truncate 입력 = 한 OC 의 16 Y16(=4×4). 출력 16 INT8 = 그 OC 의 16 pixel 값.
 - 기록 위치: `tile_out[bank][i*4+j][oc] = trunc(Y16[i][j])`, p=i*4+j (0..15), i=row j=col (tile 내).
 - **bank = tcol[0]** (= global tile index[0], 6·ty 짝수). 인접 tile 이 bank 교대 → writer(이전 tile,
@@ -196,9 +213,9 @@ WAIT_IMG    : ready_to_compute(data_ready & output_avail) 대기 (handshake §8)
 LOAD_INIT   : tile-row0(set0) row load 완료(set_ready[0]) 대기 — consumer idle
 RUN         : tile-row 0..5 처리. consumer(compute) + producer(다음 row load) 동시.
               compute_cnt(0..31)/tile_cnt(tx)/trow_cnt(ty). last_issue 시 → DRAIN
-DRAIN       : 마지막 tile M drain(mul_en 5cyc) → tile_done → 16 c2pool write → wdone
-              → WAIT_IMG.  RUN 뒤 노출 span = 23 cyc(§9; tile_out@2oc+7 의 +37 은 tile 내
-              index 라 이미 1152 에 포함, 16 write 는 23 안). (rdone 은 마지막 c1c2 read 후 = RUN 중)
+DRAIN       : 마지막 tile M drain(mul_en window) → tile_done → 16 c2pool write → wdone
+              → WAIT_IMG.  RUN 뒤 노출 span = **36** cyc(§9; tile_out@2oc+19 의 +49 은 tile 내
+              index 라 이미 1152 에 포함, 16 write 는 36 안). (rdone 은 마지막 c1c2 read 후 = RUN 중)
 ```
 
 주요 카운터:
@@ -240,13 +257,17 @@ output_bank_sel toggle on wdone   (c2pool write bank)
 | WAIT_IMG | 1 |
 | LOAD_INIT (tile-row0 row load) | 160 |
 | compute (36 tile × 32) | 1152 |
-| 마지막 tile DRAIN tail (last-tile M drain → tile_done → 16 write → wdone) | 23 |
-| **steady-state period (= wdone↔wdone)** | **1336** |
-| **측정 (iverilog, wdone↔wdone 99/99 uniform)** | **1336** ✅ |
+| 마지막 tile DRAIN tail (last-tile M drain → tile_done → 16 write → wdone) | **36** |
+| **steady-state period (= wdone↔wdone)** | **1349** |
+| **측정 (iverilog full-pipe, avg cyc/img)** | **1349** ✅ |
 
-> ★ 정정(2026-06-04 audit): 이전 doc 의 **1361 은 재현 불가** → 실측 **1336** (모든 99 interval 균일). TB 가 print 하는 avg/img **1346** = total/N 로 첫 image warmup(~2360, 첫 conv1 fill 대기) 포함값일 뿐 per-image throughput 아님. **`+37 output drain` 은 tile 내부 compute-cycle index(tile_out@2oc+7, §3)라 이미 1152 에 포함(double-count)**; RUN 뒤 노출되는 건 **마지막 tile 의 DRAIN tail 23 뿐**(16 write 는 그 23 안에 포함, 직렬 가산 아님). LOAD_INIT 도 156 아닌 **160**(=1 PIDLE-entry + 156 PLOAD + 2 PDRAIN + 1 set_ready→RUN). 1+160+1152+23 = 1336. (§10.3 e2e overlap 1336 과 일치.)
+> ★ 정정: pre-overclock 1336(tail 23) → 현행 **1349**(tail **36**). tail +13 = overclock 파이프
+> (m_valid 2oc+5→2oc+13, tile_out@2oc+7→**@2oc+19**, OT 4-stage) 가 **마지막 tile** drain 을 깊게 함
+> (steady-state 의 tile-내 drain 은 다음 tile 그림자에 겹쳐 double-count 아님 — RUN 뒤 노출은
+> 마지막 tile 1개분). LOAD_INIT 160(=1 PIDLE + 156 PLOAD + 2 PDRAIN + 1 set_ready→RUN), compute
+> 1152(36×32) 는 불변. **1+160+1152+36 = 1349.**
 
-- conv2 1798 대비 **1.35×** (DSP 184 vs 192). conv1_2x(~837)·maxpool(~590)·FC(~640) 와 함께 conv2-wino 가 bottleneck.
+- conv2 1798 대비 **1.33×** (1349 cyc, DSP 184 vs 192). conv1_2x(~837)·maxpool(~590)·FC(~640) 와 함께 conv2-wino 가 bottleneck.
 - 후속 최적화: image 간 LOAD_INIT 겹치기(다음 image 의 tile-row0 를 현 image 끝물에 load) → ~1200.
 
 ---

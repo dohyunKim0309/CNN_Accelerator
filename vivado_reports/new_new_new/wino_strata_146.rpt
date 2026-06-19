@@ -1,0 +1,7 @@
+worstSlack    count   endpoint-class
+------------------------------------------------------------------------------------------
+    -0.146        5   cnn_accelerator_system_i/ram_interconnect/s02_couplers/auto_us/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_WRITE.gen_non_fifo_w_upsizer.write_data_inst/WORD_LANE.USE_ALWAYS_PACKER.BYTE_LANE.USE_RTL_DATA.USE_REGISTER.M_AXI_WDATA_I_reg
+    -0.136        1   conv1/tr/ch.out_flat_reg
+    -0.094        3   conv2/m_im_flat_reg
+    -0.088        3   conv2/gic.u_it/tre_reg
+    -0.037        1   conv2/gpim_q_reg

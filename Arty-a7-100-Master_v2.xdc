@@ -221,10 +221,15 @@ set_property -dict { PACKAGE_PIN C2    IOSTANDARD LVCMOS33 } [get_ports { ck_rst
 ##   가속기 clk_out3 <-> CSR·AXI clk_out1(100MHz), 같은 MMCM(clk_wiz_0).
 ##
 ##   ★clk_out3 주파수는 clk_wiz IP(Output Clocks 탭)에서 설정 — 이 XDC 아님.
-##     ★MMCM 제약: clk_out1=100 + clk_out2=200(MIG ref)이 VCO 고정 → clk_out3 는 그 VCO
-##     의 ‘정수분주’만 가능 → 달성치 {200(÷5), 171.4(÷7), 166.7(÷6), 160, 150...}. **188 불가**.
-##     "188 요청"해도 200 으로 스냅됨. (현재 feed-bound 라 클럭은 latency 무영향 →
-##      마진 위해 166.7/171.4 권장; feed 풀려 accel-bound 되면 클럭 ↑. docs §13.6.)
+##     ★MMCM 제약: clk_out1=100 + clk_out2=200(MIG ref)이 VCO 를 200의배수로 고정 → clk_out3=VCO÷정수.
+##       VCO=1000(clk_wiz 기본): {200(÷5), 166.7(÷6)}.  VCO=1200(CLKFBOUT_MULT M=12): {200(÷6), 171.4(÷7)}.
+##       ★−1 칩 VCO 최대 = **1200** (DS181 MMCM_FVCOMAX: −1=1200/−2=1440/−3=1600) → 200 아래 천장 = **171.43**
+##       (VCO=1200, M=12). 177.8(VCO=1600)·190 은 −3 칩에서나. 기본 VCO=1000 이면 166.7 까지만.
+##     ★**188 불가 = silent fail 함정**: 정수분주에 없어 "188 요청"하면 clk_wiz 가 조용히 200 으로 snap →
+##       실제(200)≠요청(188), 200 에선 위반 → silent 오작동 (`overclock_journey_100_to_200mhz.md` §5).
+##       fractional(÷6.375=188.235)도 clk_out3 정수전용이라 스냅. **188/fractional 둘 다 금지.**
+##     ★최종(2026-06-19, winograd): **clk_out3 = 171.43MHz** (VCO=1200, M=12). impl 후 `report_clocks` 로
+##       clk_out3 period = **5.833ns** 실측 확인 필수(≠5.0 이면 snap = 버림). CDC 는 비정수비율에도 무죄(§2).
 ##   ※ 두 클럭은 related(같은 MMCM) — set_clock_groups -asynchronous 금지(write 버스 timed 유지).
 ##   ※ 아래 제약은 clk_out3 주파수 무관(freq-agnostic) — 200/171/166 무엇으로 재합성해도 그대로.
 ##################################################################

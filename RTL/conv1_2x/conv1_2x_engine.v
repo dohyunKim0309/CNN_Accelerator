@@ -188,8 +188,8 @@ module conv1_2x_engine #(
     //   weight-load 는 image 당 1회, 첫 valid compute(~RUN+58cyc) 보다 수십 cycle
     //   앞서 끝나므로 +1 cycle 무해. load_en 은 PE 별 fo=1 (정렬 위해 동일 +1 지연).
     //==========================================================================
-    (* max_fanout = 16 *) reg [24:0] pe_packed_w_r;   // fo=36 → 복제
-    (* max_fanout = 16 *) reg        pe_load_idx_r;    // fo=36 → 복제
+    (* max_fanout = 8 *) reg [24:0] pe_packed_w_r;   // fo=36 → 복제 (routed −1.37 → 16→8 강화)
+    (* max_fanout = 8 *) reg        pe_load_idx_r;    // fo=36 → 복제
     reg [35:0]                       pe_load_en_r;     // 각 bit = 1 PE 전용 (저fanout)
 
     always @(posedge clk) begin

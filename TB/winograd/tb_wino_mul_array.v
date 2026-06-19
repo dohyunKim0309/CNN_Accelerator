@@ -1,5 +1,9 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
+// ⚠ DEPRECATED (2026-06-12): wino_mul_array 가 "46-DSP lane 단위 + weight RAM 내장"
+//   으로 재구성되어 본 TB 의 옛 인터페이스(w_flat/a_flat/m_*_flat 일체형)와 불일치.
+//   회귀 gate 는 engine/full/2clk TB 3종이 대체 (docs/winograd/ 참조). 컴파일 불가.
+//////////////////////////////////////////////////////////////////////////////////
 // tb_wino_mul_array.v
 //   wino_mul_array 단위검증. data/winograd/ma_{w,a}.hex (NT×8IC×46) 를
 //   연속 stream (test t: cycle 2t=grp0[IC0-3], 2t+1=grp1[IC4-7]) 으로 주입,

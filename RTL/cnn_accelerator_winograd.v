@@ -7,8 +7,6 @@
 //       conv2 weight BMG = wino_weight_bram (32b×8192, pre-transformed U), c2w_addra = 13-bit.
 //       ※ iverilog 40/40 bit-exact. Vivado LUT/WNS 재확인 단계 (memory: conv2-winograd-rtl).
 //   ⚠ 베이스라인 변형은 cnn_accelerator.v (conv1_engine + conv2_engine, c2w_addra 10-bit).
-//     두 파일의 module 이름이 같으므로(cnn_accelerator) Vivado/iverilog 에 동시 추가 금지.
-//     빌드할 변형 하나만 source 로 포함할 것 (conv2 weight BMG depth/주소폭이 다름).
 //   ──────────────────────────────────────────────────────────────────────────
 //
 //   Pipeline (검증된 통합 TB 배선 그대로):
@@ -53,7 +51,10 @@
 //   block design 에서 AXI BRAM Controller 연결.
 //////////////////////////////////////////////////////////////////////////////////
 
-module cnn_accelerator (
+// ★ 모듈명 = 파일명 일치 (2026-06-12): cnn_accelerator → cnn_accelerator_winograd.
+//   baseline cnn_accelerator.v 와 같은 프로젝트에 공존 가능 (옛 중복모듈 함정 해소).
+//   Vivado BD 의 module reference 는 이름 기준 → 블록 삭제 후 Add Module 로 재생성 필요.
+module cnn_accelerator_winograd (
     input  wire        clk,           // ★ 200MHz datapath clock (overclock). 모든 engine + BMG Port B.
     input  wire        aclk,          // ★ 100MHz 제어/AXI-side clock (CSR·AXI BRAM Ctrl 와 동일 MMCM 출력).
                                        //    제어 pulse CDC 의 100MHz 측 + bram_output Port B(PS read) clkb.
@@ -143,15 +144,22 @@ module cnn_accelerator (
     //   ★ 기능 불변: 모든 하류 register 가 동일하게 reset 됨. deassert 만 +2 clk 더
     //     지연(전체 idle-start 라 무해), assertion 은 각 단이 negedge resetn 으로 즉시.
     //==========================================================================
-    (* max_fanout = 32 *)  reg rst_l1;     // L1: trunk (few copies)
+    // ★ 3-level 트리 (winograd routed: l1→leaf hop 자체가 −1.2대 ~60 EP 로 떠서
+    //   중간층 rst_l2 삽입 + l1 복제 강화. deassert +1 clk 추가 지연 — idle-start 무해.)
+    (* max_fanout = 16 *)  reg rst_l1;     // L1: trunk (few copies)
     always @(posedge clk or negedge resetn)
         if (!resetn) rst_l1 <= 1'b1;
         else         rst_l1 <= rst_sync;
 
-    (* max_fanout = 128 *) reg rst_leaf;   // L2: leaf (heavily replicated → datapath)
+    (* max_fanout = 64 *)  reg rst_l2;     // L2: mid (★신규 — l1↔leaf 거리 분할)
+    always @(posedge clk or negedge resetn)
+        if (!resetn) rst_l2 <= 1'b1;
+        else         rst_l2 <= rst_l1;
+
+    (* max_fanout = 128 *) reg rst_leaf;   // L3: leaf (heavily replicated → datapath)
     always @(posedge clk or negedge resetn)
         if (!resetn) rst_leaf <= 1'b1;
-        else         rst_leaf <= rst_l1;
+        else         rst_leaf <= rst_l2;
 
     wire rst = rst_leaf;
 
@@ -267,8 +275,10 @@ module cnn_accelerator (
     //==========================================================================
     // DUT 1: Conv1  (★ conv1_2x = DSP 18→36 single-round drop-in. 포트 동일.
     //   원본은 conv1_engine — RTL/conv1_2x/ 3종으로 교체. conv1_adder_tree 는 공유.)
+    //   ★ PE_BC_DELAY=2: routed 에서 conv1 pe_en_sr/x broadcast 가 −1.35 → bc
+    //     register 1단 추가 (FSM 무변경, WR_PIPE 내부 정합 — conv1_2x_engine 주석).
     //==========================================================================
-    conv1_2x_engine conv1 (
+    conv1_2x_engine #(.PE_BC_DELAY(2)) conv1 (
         .clk          (clk),
         .rst          (rst),
         .start        (1'b0),                 // legacy (사용 X)

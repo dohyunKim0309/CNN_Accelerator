@@ -13,7 +13,19 @@
   numbering: "1",
   number-align: center,
 )
-#set text(font: ("Noto Serif CJK KR"), size: 10.5pt, lang: "ko")
+// 본문 폰트: 맥 기본 한글 폰트 우선 + Noto/나눔 fallback (환경 무관 안전).
+// 앞에서부터 설치된 것을 사용 — 어느 폰트도 없을 때만 깨짐.
+#set text(
+  font: (
+    "Apple SD Gothic Neo",   // macOS 기본 (항상 존재)
+    "AppleMyungjo",          // macOS 기본 명조
+    "Noto Serif CJK KR",     // Linux/CI fallback
+    "Noto Sans CJK KR",
+    "NanumGothic",
+    "Malgun Gothic",         // Windows fallback
+  ),
+  size: 10.5pt, lang: "ko",
+)
 #set par(justify: true, leading: 0.72em)
 #show heading: set block(above: 1.2em, below: 0.7em)
 #set heading(numbering: "1.1")
@@ -27,11 +39,11 @@
   inset: 8pt,
   radius: 3pt,
   width: 100%,
-  text(font: ("DejaVu Sans Mono", "Noto Sans CJK KR"), size: 8.5pt, it),
+  text(font: ("Menlo", "DejaVu Sans Mono", "Apple SD Gothic Neo", "Noto Sans CJK KR"), size: 8.5pt, it),
 )
 #show raw.where(block: false): it => box(
   fill: luma(240), inset: (x: 2pt), outset: (y: 2pt), radius: 2pt,
-  text(font: ("DejaVu Sans Mono", "Noto Sans CJK KR"), size: 9pt, it),
+  text(font: ("Menlo", "DejaVu Sans Mono", "Apple SD Gothic Neo", "Noto Sans CJK KR"), size: 9pt, it),
 )
 
 // ---- 헬퍼: 그림 / 표 / 코드 발췌 -------------------------------------------

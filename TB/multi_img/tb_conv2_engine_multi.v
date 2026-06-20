@@ -146,11 +146,11 @@ module tb_conv2_engine_multi;
         wait (p_done && c_done);
         repeat (20) @(posedge clk);
 
-        $display("\n=== conv2 단독 결과 ===");
+        $display("\n=== conv2 standalone result ===");
         $display("  images        : sent=%0d recv=%0d (target %0d)", p_sent, c_recv, N_IMAGES);
         $display("  mismatch      : %0d", c_mm);
         $display("  assert_fail   : producer=%0d consumer=%0d", p_af, c_af);
-        $display("  backpressure  : prod_sat=%0d cons_sat=%0d (outstanding/available=2 도달)", prod_sat, cons_sat);
+        $display("  backpressure  : prod_sat=%0d cons_sat=%0d (outstanding/available=2 reached)", prod_sat, cons_sat);
         $display("  total cycles  : %0d", cyc);
         if (c_mm == 0 && p_af == 0 && c_af == 0 && c_recv == N_IMAGES)
             $display("  *** PASS *** (all %0d images bit-exact, no protocol violation)", N_IMAGES);

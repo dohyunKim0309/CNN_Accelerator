@@ -182,11 +182,11 @@ module tb_conv1_conv2_multi;
         wait (p_done && c_done);
         repeat (20) @(posedge clk);
 
-        $display("\n=== conv1+conv2 통합 결과 ===");
+        $display("\n=== conv1+conv2 integration result ===");
         $display("  images        : sent=%0d recv=%0d (target %0d)", p_sent, c_recv, N_IMAGES);
         $display("  mismatch      : %0d", c_mm);
         $display("  assert_fail   : producer=%0d consumer=%0d", p_af, c_af);
-        $display("  backpressure  : prod_sat=%0d cons_sat=%0d (입력/출력 포화 도달)", prod_sat, cons_sat);
+        $display("  backpressure  : prod_sat=%0d cons_sat=%0d (in/out saturation reached)", prod_sat, cons_sat);
         $display("  total cycles  : %0d", cyc);
         if (c_mm == 0 && p_af == 0 && c_af == 0 && c_recv == N_IMAGES)
             $display("  *** PASS *** (all %0d images bit-exact, no protocol violation)", N_IMAGES);

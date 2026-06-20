@@ -149,7 +149,7 @@ module tb_conv1_engine;
     task init_input;
         integer k;
         begin
-            $display("[TB] @ cycle %0d : init_input start (196 word × 32-bit, bank 0)", cycle_cnt);
+            $display("[TB] @ cycle %0d : init_input start (196 word x 32-bit, bank 0)", cycle_cnt);
             // 784 byte = 196 word (4 byte / word). Little-endian packing.
             for (k = 0; k < 196; k = k + 1) begin
                 @(negedge clk);

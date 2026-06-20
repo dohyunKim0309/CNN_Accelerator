@@ -214,7 +214,7 @@ module tb_conv2_engine;
     // Main stimulus
     //==========================================================================
     initial begin
-        $display("[TB] === Conv2 single-image bit-exact test (공유 BMG, 100MHz) ===");
+        $display("[TB] === Conv2 single-image bit-exact test (shared BMG, 100MHz) ===");
         $readmemh(`CONV1_HEX,  c1c2_data);        // conv1 output (= c1c2 input)
         $readmemh(`WEIGHT_HEX, weight_mem);
         $readmemh(`CONV2_HEX,  expected_c2pool);
@@ -262,7 +262,7 @@ module tb_conv2_engine;
         $display("  start            @ cycle %0d", cycle_at_start);
         $display("  prior_wdone      @ cycle %0d", cycle_at_prior_wdone);
         $display("  wdone            @ cycle %0d", cycle_at_wdone);
-        $display("  compute (start→wdone) : %0d cycles", cycle_at_wdone - cycle_at_start);
+        $display("  compute (start->wdone) : %0d cycles", cycle_at_wdone - cycle_at_start);
         $display("  mismatches            : %0d / 576", total_mm);
         if (total_mm == 0)
             $display("  *** PASS *** (bit-exact match)");

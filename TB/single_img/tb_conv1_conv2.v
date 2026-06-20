@@ -211,7 +211,7 @@ module tb_conv1_conv2;
     task init_input;
         integer k;
         begin
-            $display("[TB] @ %0d : init_input (196 word × 32-bit, bank 0)", cycle_cnt);
+            $display("[TB] @ %0d : init_input (196 word x 32-bit, bank 0)", cycle_cnt);
             for (k = 0; k < 196; k = k + 1) begin
                 @(negedge clk);
                 in_ena = 1'b1; in_wea = 4'hF;

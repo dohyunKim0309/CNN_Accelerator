@@ -35,7 +35,8 @@ module producer_bfm #(
     parameter integer WEA_W     = 4,        // wea 폭 (bram_input=4, c1c2=8)
     parameter integer AW        = 9,        // Port A addr 폭; bank = addr[AW-1]
     parameter integer WORDS     = 196,      // 이미지당 word 수
-    parameter integer N_IMAGES  = 40,
+    parameter integer N_IMAGES  = 40,       // 실제 전송할 이미지 수
+    parameter integer DATA_IMAGES = 100,    // hex 파일이 담은 전체 이미지 수 (배열 sizing 전용)
     parameter         IMG_HEX   = "data/multi_img/all_input.hex",
     parameter [15:0]  SEED      = 16'hACE1,
     parameter integer MAX_IDLE  = 2000,     // 이미지간 random idle 상한 (cyc)
@@ -55,7 +56,7 @@ module producer_bfm #(
     output reg              done
 );
     localparam integer PACK = DW / SRC_DW;
-    reg [SRC_DW-1:0] src_mem [0:N_IMAGES*WORDS*PACK-1];
+    reg [SRC_DW-1:0] src_mem [0:DATA_IMAGES*WORDS*PACK-1];
     initial $readmemh(IMG_HEX, src_mem);
 
     // 엔진 rdone counter (credit source)
@@ -126,7 +127,8 @@ module consumer_bfm #(
     parameter integer AW        = 11,       // Port B addr 폭; bank = addr[AW-1]
     parameter integer WORDS     = 576,      // 이미지당 word 수
     parameter integer READ_LAT  = 2,        // BMG read latency L
-    parameter integer N_IMAGES  = 40,
+    parameter integer N_IMAGES  = 40,       // 실제 소비할 이미지 수
+    parameter integer DATA_IMAGES = 100,    // hex 파일이 담은 전체 이미지 수 (배열 sizing 전용)
     parameter         EXP_HEX   = "data/multi_img/all_c2pool.hex",
     parameter [15:0]  SEED      = 16'hBEEF,
     parameter integer MAX_IDLE  = 2000,
@@ -144,7 +146,7 @@ module consumer_bfm #(
     output reg [31:0]    assert_fail,
     output reg           done
 );
-    reg [DW-1:0] exp_mem [0:N_IMAGES*WORDS-1];
+    reg [DW-1:0] exp_mem [0:DATA_IMAGES*WORDS-1];
     initial $readmemh(EXP_HEX, exp_mem);
 
     // 엔진 wdone counter (availability source)

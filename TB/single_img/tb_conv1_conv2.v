@@ -16,7 +16,7 @@
 //   필요한 BMG IP (Vivado 프로젝트에 미리 생성):
 //     bram_input           (TB 인스턴스)         Port A 32b×512 / Port B 8b×2048, asymmetric, L=1
 //     bram_c1_to_c2        (TB 인스턴스)         64b×2048, L=2, byte-write 8-bit
-//     bram_c2_to_pool      (TB 인스턴스)         128b×2048, L=1
+//     bram_c2_to_pool      (TB 인스턴스)         128b×2048, L=2
 //     conv1_weight_bram    (conv1_engine 내부)   32b×64,  L=2, REGCEB
 //     conv2_weight_bram    (conv2_engine 내부)   32b×1024, L=2, REGCEB
 //   상세 spec: docs/ip_spec/block_memory_generator.md
@@ -275,7 +275,7 @@ module tb_conv1_conv2;
     endtask
 
     //==========================================================================
-    // Compare task: c2pool BMG bank 0 vs expected (576 entries, L=1 pipelined read)
+    // Compare task: c2pool BMG bank 0 vs expected (576 entries, L=2 pipelined read)
     //==========================================================================
     integer total_mm;
     task compare_c2pool;
@@ -284,7 +284,7 @@ module tb_conv1_conv2;
         begin
             total_mm = 0;
             $display("[TB] Comparing c2pool BMG bank 0 vs expected ...");
-            for (i = 0; i < 577; i = i + 1) begin
+            for (i = 0; i < 578; i = i + 1) begin      // L=2: 576 + 2
                 @(negedge clk);
                 if (i < 576) begin
                     c2pool_enb_b  = 1'b1;
@@ -293,14 +293,14 @@ module tb_conv1_conv2;
                     c2pool_enb_b  = 1'b0;
                 end
 
-                if (i > 0) begin
+                if (i >= 2) begin                      // L=2: i-2 데이터 비교
                     got = c2pool_doutb_b;
-                    exp = expected_c2pool[i - 1];
+                    exp = expected_c2pool[i - 2];
                     if (got !== exp) begin
                         total_mm = total_mm + 1;
                         if (total_mm <= 10)
                             $display("  MM @ addr %0d : got=%h, exp=%h",
-                                     i - 1, got, exp);
+                                     i - 2, got, exp);
                     end
                 end
             end

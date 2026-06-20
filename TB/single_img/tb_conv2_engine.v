@@ -11,7 +11,7 @@
 //
 //   공유 BMG 모델: TB/models/bmg_sim_models.v (iverilog) / 실제 BMG IP (Vivado).
 //     bram_c1_to_c2     (64b × 2048, byte-write 8b, L=2)
-//     bram_c2_to_pool   (128b × 2048, L=1)
+//     bram_c2_to_pool   (128b × 2048, L=2)
 //     conv2_weight_bram (32b × 1024, L=2, regceb — DUT 내부 인스턴스)
 //////////////////////////////////////////////////////////////////////////////////
 
@@ -186,8 +186,8 @@ module tb_conv2_engine;
         reg [127:0] got, exp;
         begin
             total_mm = 0;
-            $display("[TB] Comparing c2pool BMG bank 0 (576 entries, L=1) vs expected ...");
-            for (i = 0; i < 577; i = i + 1) begin
+            $display("[TB] Comparing c2pool BMG bank 0 (576 entries, L=2) vs expected ...");
+            for (i = 0; i < 578; i = i + 1) begin      // L=2: 576 + 2
                 @(negedge clk);
                 if (i < 576) begin
                     c2pool_enb_b  = 1'b1;
@@ -195,14 +195,14 @@ module tb_conv2_engine;
                 end else begin
                     c2pool_enb_b  = 1'b0;
                 end
-                if (i > 0) begin                       // L=1: i-1 데이터 비교
+                if (i >= 2) begin                      // L=2: i-2 데이터 비교
                     got = c2pool_doutb_b;
-                    exp = expected_c2pool[i - 1];
+                    exp = expected_c2pool[i - 2];
                     if (got !== exp) begin
                         total_mm = total_mm + 1;
                         if (total_mm <= 10)
                             $display("  MM @ addr %0d (h=%0d w=%0d) : got=%h, exp=%h",
-                                     i-1, (i-1)/24, (i-1)%24, got, exp);
+                                     i-2, (i-2)/24, (i-2)%24, got, exp);
                     end
                 end
             end

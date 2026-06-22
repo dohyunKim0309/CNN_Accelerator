@@ -6,3 +6,6 @@ __pycache__/
 *.vvp
 *.vcd
 .claude/
+
+# report build dir — kept on disk, not version-controlled
+report/

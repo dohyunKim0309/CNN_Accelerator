@@ -1,9 +1,11 @@
 # CNN Accelerator
 
 > Arty A7-100T FPGA 보드 위에서 동작하는 MNIST CNN 추론 가속기.
-> Conv1 → Conv2 → MaxPool → FC 파이프라인을 INT8 데이터패스로 구현하며,
-> Direct baseline 200MHz 보드 검증을 완료했고, 현재 Conv2 Winograd 가속 버전을
-> 200MHz synthesis + implementation 중이다.
+> Conv1 → Conv2 → MaxPool → FC 파이프라인을 INT8 데이터패스로 구현한다.
+> Direct baseline 은 200MHz 로 timing closure 하여 MNIST 1만 장을 **10,000/10,000 정확도, 약 98ms**
+> 에 보드 실측 완료했다. 추가로 Conv2 complex Winograd F(4,3) + DSP48E1 SIMD packing 가속 버전을
+> 설계해 시뮬레이션 bit-exact 검증과 두 동작점(171.42 / 200MHz) timing closure 를 마쳤다
+> (보드 실측은 제출 마감 이후 확정되어 latency 는 추정).
 
 **수업**: 지능형시스템설계및응용
 
@@ -47,15 +49,21 @@ Output Logit (10) → argmax
 
 > 단일 이미지 latency 뿐 아니라 PS-PL 데이터 전송, BRAM 입출력, 1만 장 batch 전체에 걸친 누적 시간을 모두 고려한 end-to-end 시간이 평가 기준이다.
 
-### 현재 상태 (2026-06-04)
+### 현재 상태 (2026-06-22)
 
-- **Direct baseline**: 200MHz 구현 및 보드 검증 완료
-  - MNIST 10,000장 class match: **10000 / 10000**
-  - 최초 200MHz HW 실측: **108.9 ms**
-  - Vitis feed-overlap 최적화 후 현재 기준선: **약 98 ms**
-- **Winograd 버전**: Conv2 Winograd 및 Conv1 2× rebalance 추가 후 **200MHz synthesis + implementation 진행 중**
-  - Conv2 Winograd engine 은 iverilog 기준 bit-exact 검증 완료
-  - 보드 실측 latency 는 implementation 완료 후 갱신 예정
+- **Direct baseline — 보드 실측 완료**
+  - 200MHz timing closure (WNS **+0.011 ns** @ slow corner)
+  - MNIST 10,000장 정확도 **10,000 / 10,000**
+  - end-to-end latency **약 98 ms** (순차 baseline 1,197 ms 대비 누적 **12.2×**, 전 단계 보드 실측)
+  - DSP **226 / 240 (94%)** = Conv2 192 + Conv1 18 + FC 16
+- **Winograd 버전 — 시뮬레이션 검증 + timing closure 완료, 보드 실측 미수행**
+  - Conv2 complex Winograd F(4×4, 3×3) (Conv2 곱셈 직접 conv 대비 **3.13×** 감소) + Conv1 2× rebalance
+  - top-module TB **bit-exact 100/100** (avg 1,341 cyc/img)
+  - implementation **두 동작점 timing-met**: 171.42MHz robust (WNS +0.180) / 200MHz tight (WNS +0.050, over-constrain)
+  - DSP **236 / 240 (98.33%)** = Winograd 184 + Conv1 2× 36 + FC 16
+  - 200MHz closure 가 보드 제출 마감 이후 확정 → **보드 실측 미수행**. latency 는 cycle + baseline feed 오버헤드(~8 ms) 기반 추정 **~86 ms (171.42MHz, ~13.9×) / ~75 ms (200MHz, ~16.0×)**
+
+> 다음 병목은 연산이 아니라 **PS-PL feed** 다 — 클럭을 2배로 올려도 latency 가 1.72× 만 줄어든 것은 전체 시간의 72% 가 입력 전송에 묶여 있기 때문이며, Winograd 의 연산 이득을 온전히 얻으려면 feed overlap 이 선행되어야 한다.
 
 ---
 
@@ -65,28 +73,31 @@ Output Logit (10) → argmax
 
 ### Phase 0 — Sobel Baseline (완료)
 
-`AS1_Sobel_Baseline/` 에 위치. 102×102 grayscale 이미지에 대한 3×3 Sobel edge detection IP. CNN 가속기를 위한 기본 인프라(Line buffer + 3×3 window register, AXI CSR 슬레이브, BRAM Port A/B 분리, PS-PL 데이터 전송 프로토콜) 를 검증하는 단계.
+`archive/` 에 위치. 102×102 grayscale 이미지에 대한 3×3 Sobel edge detection IP. CNN 가속기를 위한 기본 인프라(Line buffer + 3×3 window register, AXI CSR 슬레이브, BRAM Port A/B 분리, PS-PL 데이터 전송 프로토콜) 를 검증하는 단계.
 
 ### Phase 1 — INT8 Direct CNN Accelerator (완료)
 
 `RTL/` 에서 본격적으로 시작. 명세 그대로의 INT8 Direct Convolution 으로 전체 파이프라인을 구현하고, 1만 장 처리 latency 의 기준선(baseline) 을 확보한 단계.
 
 - Output Stationary + Weight Stationary 데이터플로우 채택
-- Conv1 기준 `oc_par × ic_par × KH × KW = 2 × 2 × 3 × 3 = 18 DSP` 사용
-- Conv2 기준 `oc_par × ic_par × KH = 8 × 16 × 3 = 192 DSP` 사용
+- DSP48E1 SIMD packing 으로 1개 DSP 가 INT8 곱 2개를 동시 수행 (출력 채널 pair 단위)
+- Conv1: `K(9) × OC_pair(2) = 18 DSP` (8 출력채널을 2 round 로 시분할)
+- Conv2: `OC_pair(8) × IC(8) × K_row(3) = 192 DSP` ← 전체 곱셈의 90% 차지
+- FC: `16 DSP` → 합계 **226 / 240 DSP (94%)**
 - 채널별 line buffer + window register 로 streaming 처리
-- 200MHz post-implementation timing closure 및 보드 검증 완료
-- 현재 baseline: **200MHz, MNIST 10,000장 약 98 ms**
+- 200MHz post-implementation timing closure (WNS +0.011 ns) 및 보드 검증 완료
+- baseline 실측: **200MHz, MNIST 10,000장 약 98 ms, 10,000/10,000**
 
-### Phase 2 — Winograd Conv2 가속 (진행 중)
+### Phase 2 — Winograd Conv2 가속 (설계·검증·timing closure 완료, 보드 실측 미수행)
 
-Conv2 가 전체 latency 의 병목임을 확인했으므로, complex F(4,3) Winograd 변환으로 Conv2 의 multiply 수를 줄여 1만 장 처리 시간을 단축한다.
+Conv2 가 전체 곱셈의 90% 를 차지하는 병목임을 확인했으므로, complex F(4,3) Winograd 변환으로 Conv2 의 multiply 수를 직접 conv 대비 **3.13×** 줄였다. 이로 인해 이동한 병목은 Conv1 2× rebalance 로 맞췄다.
 
 - 8×8 INT8 SIMD packing 알고리즘은 `docs/DSP48E1_signed8x8_SIMD_Packing.md` 에 정리
-- 알고리즘 reference 구현은 `scripts/golden_sim/1_complex_winograd_f(4,3).py`
-- Winograd 관련 작업은 `RTL/conv2_winograd/`, `RTL/conv1_2x/`, `docs/winograd/` 에 정리
-- Conv2 Winograd engine 은 iverilog bit-exact 검증 완료
-- 현재 200MHz synthesis + implementation 진행 중이며, HW 실측 결과는 pending
+- 알고리즘 reference 구현은 `scripts/golden_sim/1_complex_winograd_f(4,3).py` (10,000장 bit-exact)
+- Winograd RTL 은 `RTL/conv2_winograd/`, `RTL/conv1_2x/`, 설계 문서는 `docs/winograd/`
+- top-module TB **100/100 bit-exact** (avg 1,341 cyc/img), Conv1 2× gate 40/40 bit-exact
+- implementation **두 동작점 timing-met** (171.42MHz WNS +0.180 / 200MHz WNS +0.050, over-constrain), DSP **236/240 (98.33%)**
+- 200MHz closure 가 보드 제출 마감 이후 확정되어 **보드 실측 미수행** — latency 추정 **~86 ms / ~75 ms**
 
 ### Phase 3 — 최적화
 
@@ -96,7 +107,7 @@ Conv2 가 전체 latency 의 병목임을 확인했으므로, complex F(4,3) Win
 
 ## 3. 시스템 아키텍처 (Block Design)
 
-전체 시스템은 Vivado Block Design 상에서 다음과 같이 구성된다. Microblaze 가 PS 역할을 담당하며 AXI Interconnect 를 통해 BRAM Controller, CSR, 디버그용 Uartlite 와 연결되고, CNN 가속 본체는 `cnn_accel_top` 내부에 모두 들어간다.
+전체 시스템은 Vivado Block Design 상에서 다음과 같이 구성된다. Microblaze 가 PS 역할을 담당하며 AXI Interconnect 를 통해 BRAM Controller, CSR, 디버그용 Uartlite 와 연결되고, CNN 가속 본체는 `cnn_accelerator` 내부에 모두 들어간다.
 
 ```
 Block Design (Vivado GUI)
@@ -109,7 +120,7 @@ Block Design (Vivado GUI)
 │   └── peripheral_aresetn → 모든 AXI peripheral reset
 │       ├── CSR_AXI.S_AXI_ARESETN
 │       ├── BRAM Controller × 4의 reset
-│       └── cnn_accel_top.reset (자체 reset port 만들어서)
+│       └── cnn_accelerator.reset (자체 reset port 만들어서)
 ├── AXI BRAM Controller × 4
 │   ├── input_bram_ctrl
 │   ├── conv1_w_ctrl
@@ -122,10 +133,10 @@ Block Design (Vivado GUI)
         ├── conv1_engine (Direct conv, DSP+LUT mult)
         │   ├── input_bram (BRAM × 2 bank)
         │   ├── conv1_w_bram
-        │   └── pe_array  ※ core_module (line_buffer, window_register, pe_cell, truncate_relu) 인스턴스화
-        ├── conv2_engine / conv2_winograd_engine (Direct baseline 완료, Winograd 통합 진행)
+        │   └── pe_array  ※ core (line_buffer, window_register, pe_cell, truncate_relu) 인스턴스화
+        ├── conv2_engine / conv2_winograd_engine (Direct / Winograd 변형, 동일 module 명 상호배타)
         │   ├── conv2_w_bram (Direct baseline)
-        │   ├── wino_weight_rom (Winograd baked ROM)
+        │   ├── wino_weight_bram (PS 가 pre-transform 한 U 를 적재)
         │   └── pe_array 또는 Winograd datapath
         ├── maxpool_engine
         ├── fc_engine
@@ -139,8 +150,8 @@ Block Design (Vivado GUI)
 
 - **AXI BRAM Controller × 4** — 입력 이미지와 세 종류의 weight (Conv1, Conv2, FC) 가 각각 독립된 BRAM 에 매핑되어 PS 가 병렬로 적재 가능
 - **Reset 트리** — `Processor System Reset` 이 외부 버튼과 Clocking Wizard `locked` 를 받아 모든 AXI peripheral 및 가속기 IP 의 `peripheral_aresetn` 을 동기 release
-- **`cnn_accel_top` 내부 dataflow** — Conv1 → Conv2 → MaxPool → FC → argmax 의 single-image inference 파이프라인. `ping_pong_buffer` 로 stage 간 producer/consumer 를 분리해 연속 1만 장 추론의 throughput 을 끌어올림
-- **`core_module` 공용화** — `line_buffer`, `window_register`, `pe_cell`, `truncate_relu` 는 `RTL/core_module/` 에 분리하여 conv1_engine / conv2_engine 이 동일 PE 빌딩 블록을 인스턴스화. parameter 로 channel / output width 만 조정
+- **`cnn_accelerator` 내부 dataflow** — Conv1 → Conv2 → MaxPool → FC → argmax 의 single-image inference 파이프라인. `ping_pong_buffer` 로 stage 간 producer/consumer 를 분리해 연속 1만 장 추론의 throughput 을 끌어올림
+- **`core` 공용화** — `line_buffer`, `window_register`, `pe_cell`, `truncate_relu` 는 `RTL/core/` 에 분리하여 conv1_engine / conv2_engine 이 동일 PE 빌딩 블록을 인스턴스화. parameter 로 channel / output width 만 조정
 - **결과 출력** — `argmax_unit` 이 10-class logit 에서 4-bit class index 와 `img_done` 신호를 만들어 PS 로 보고
 
 ---
@@ -149,76 +160,77 @@ Block Design (Vivado GUI)
 
 ```
 CNN_Accelerator/
-├── AS1_Sobel_Baseline/   # Phase 0: Sobel edge detector IP (인프라 검증용)
-├── RTL/                  # Phase 1+: CNN 가속기 RTL (메인 산출물)
-├── TB/                   # Verilog testbench (현재 비어 있음, 엔진별 추가 예정)
-├── scripts/              # Python reference / weight·activation 변환 스크립트
-│   ├── golden_sim/       # 명세 검증 reference (bit-exact 비교, Winograd 알고리즘)
-│   ├── weights/          # Winograd weight transform / ROM 생성
-│   ├── header_gen/       # SIMD-packed weight 를 C header 로 변환
-│   └── hex_gen/          # Verilog $readmemh 용 hex dump 생성
-├── data/                 # 학습 완료된 weight 와 reference 입출력
-│   ├── npy/              # .npy 원본 (input, weight, expected output)
-│   ├── headers_simd/     # scripts/header_gen 산출물
-│   ├── hex_layer_by_layer/ # scripts/hex_gen 산출물
-│   └── params.zip        # 원본 파라미터 묶음
-└── docs/                 # 설계 명세, 구현 계획, 알고리즘 문서, 협업 가이드
+├── RTL/                  # CNN 가속기 합성 대상 Verilog (메인 산출물)
+│   ├── cnn_accelerator.v          # baseline 최상위 IP (전체 배선 + BMG IP 목록)
+│   ├── cnn_accelerator_winograd.v # Winograd 변형 최상위 (동일 module 명 상호배타)
+│   ├── core/             # stage 공용 primitive (pe_cell, line_buffer, window_register, truncate_relu)
+│   ├── conv1/ conv2/ maxpool/ fc/ # 레이어별 engine + FSM + adder/accumulator
+│   ├── conv1_2x/         # Winograd 단계용 Conv1 2× DSP rebalance
+│   ├── conv2_winograd/   # complex F(4,3) Winograd Conv2 engine
+│   └── control_status_register/   # AXI4-Lite CSR slave
+├── TB/                   # Verilog testbench (Vivado 없이 iverilog 로컬 시뮬 가능)
+│   ├── models/           # 합성 불가 시뮬 모델 (BMG/BRAM, DSP48E1)
+│   ├── single_img/       # 단일 이미지 단위 TB
+│   ├── multi_img/        # 다중 이미지 통합 TB (전체 파이프라인, AXI 포함)
+│   └── winograd/         # Winograd 전용 TB
+├── scripts/              # 골든/입력 데이터 생성 (Python) → data/ 로
+│   ├── golden_sim/       # PyTorch bit-exact reference (Direct + Winograd)
+│   ├── single_img/ multi_img/     # 레이어별 / 다중 이미지 hex 생성
+│   └── weights/          # DSP SIMD weight packing
+├── data/                 # 생성된 검증/입력 데이터 (scripts/ 산출물)
+│   ├── _base_npy/        # 원본 PyTorch npy (weight / input / output)
+│   ├── single_img/ multi_img/     # 레이어별 / 다중 골든 hex
+│   ├── weights_simd/     # SIMD packed weight (.hex=TB / .h=vitis)
+│   └── winograd/         # Winograd 골든 데이터
+├── vitis/                # PS(MicroBlaze) 펌웨어 (main.c, test_images.h)
+├── archive/              # 이전 과제(AS1 Sobel) baseline — 인프라 검증용 참고
+└── docs/                 # 설계·타이밍·알고리즘·협업 문서 (+ ip_spec/, overclock/, winograd/)
 ```
-
-### `AS1_Sobel_Baseline/`
-
-Phase 0 산출물. CNN 본 구현에 들어가기 전 PS-PL 인터페이스, AXI CSR, BRAM dual-port 사용법, line buffer 기반 stencil 연산을 검증한 첫 번째 IP.
-
-- `sobel_ip.v` — 102×102 입력 → 100×100 Sobel 출력 (Output Stationary, 3×3 direct conv)
-- `line_buffer.v` — 2 줄 circular line buffer (BRAM 추론)
-- `axi_slave_csr_inner.v` — start/done 제어용 AXI-Lite slave CSR
-- `top_memory_ctrlr.v` — BRAM1/BRAM2 Port A 와 sobel_ip 연결 top
-- `testbench.v` — Vivado simulation testbench
-- `main.c` — Vitis baremetal app (BRAM1 write → start → done poll → BRAM2 read & verify)
 
 ### `RTL/`
 
-Phase 1 이후 모든 CNN 가속기 RTL 이 모이는 메인 디렉토리. 위 Block Design 에서 `cnn_accel_top` 및 그 하위 sub-engine 들이 여기에 위치한다.
+CNN 가속기의 합성 대상 Verilog 가 모두 모이는 메인 디렉토리.
 
-- `cnn_accel_top.v` — Top IP. BRAM1 (input) / BRAM2 (output) 을 내장하고, PL-side 는 cnn_accelerator 와 연결, PS-side 는 외부 AXI BRAM Controller 와 연결
-- `axi_csr_inner.v` — start / done 제어용 AXI-Lite CSR (Sobel 단계 CSR 의 진화 버전)
-- `core_module/` — Conv1/Conv2 공용 PE 빌딩 블록
-  - `line_buffer.v`, `window_register.v` — streaming stencil 처리용 라인/윈도우 버퍼
-  - `pe_cell.v` — INT8 MAC 단위 PE (parameter 화)
-  - `truncate_relu.v` — LSB-10bit shift + saturation + ReLU (parameter 화)
-- `conv1/` — Conv1 engine
-  - `conv1_engine.v`, `conv1_fsm.v`, `adder_tree.v`, `weight_loader.v`
-- `conv1_2x/` — Winograd 단계에서 Conv1 병목을 낮추기 위한 2× DSP rebalance 버전
-- `conv2/` — Direct baseline Conv2 engine
-- `conv2_winograd/` — Complex F(4,3) Winograd Conv2 engine
+- `cnn_accelerator.v` — baseline 최상위 모듈. 전체 데이터패스 배선 + 필요한 BMG(BRAM) IP 목록이 파일 헤더 주석에 정리됨. packaged IP 로 Block Design 에 인스턴스화
+- `cnn_accelerator_winograd.v` — Winograd 변형 최상위 (동일 module 명이라 baseline 과 상호배타)
+- `core/` — stage 공용 PE 빌딩 블록: `pe_cell.v` (DSP48E1 INT8×2 SIMD 곱), `line_buffer.v` / `window_register.v` (sliding-window 생성), `truncate_relu.v` (`>>10` + saturate ±127 + ReLU)
+- `conv1/` `conv2/` `maxpool/` `fc/` — 레이어별 engine + 자체 FSM + adder-tree / accumulator. stage 사이는 ping-pong BRAM + producer/consumer 핸드셰이크로 분산 제어 (중앙 컨트롤러 없음)
+- `conv1_2x/` — Winograd 단계에서 Conv1 을 18→36 DSP 로 늘려 2 round → 1 round 화한 rebalance 버전
+- `conv2_winograd/` — complex F(4,3) Winograd Conv2 engine (DSP 184)
+- `control_status_register/` — start/done·result·timer 제어용 AXI4-Lite CSR slave
 
-(이후 maxpool_engine / fc_engine / argmax_unit / ping_pong_buffer 등이 추가될 예정)
+### `TB/`
+
+Verilog testbench. Vivado 없이 `iverilog` 로 로컬에서 전체 파이프라인을 bit-exact 검증할 수 있다.
+
+- `models/` — 합성 불가 시뮬 모델 (`bmg_sim_models.v`, `dsp48e1_model.v`)
+- `single_img/` — 엔진별 단일 이미지 TB
+- `multi_img/` — 다중 이미지 통합 TB (`tb_cnn_accelerator_multi` = 전체 PL core, `tb_system_axi_multi_2clk` = AXI / 멀티클럭 포함)
+- `winograd/` — Winograd 전용 TB
+
+### `archive/`
+
+이전 과제(AS1 Sobel edge detection) baseline. CNN 본 구현 전 PS-PL 인터페이스, AXI CSR, BRAM dual-port, line-buffer stencil 연산을 검증한 인프라이며, 본 프로젝트의 line-buffer sliding-window 구조가 여기서 재사용되었다.
 
 ### `scripts/`
 
-하드웨어 구현에 앞서 알고리즘적으로 명세를 검증하고, 검증된 데이터를 RTL/SW 가 먹을 수 있는 형식으로 변환하는 Python 스크립트 모음.
+명세를 알고리즘적으로 검증하고, 검증된 데이터를 RTL / SW 가 먹을 형식으로 변환하는 Python 스크립트. 산출물은 `data/` 로 간다.
 
-- `golden_sim/` — 명세 검증 reference
-  - `reference_core.py` — 공통 유틸리티. `.npy` 로드, MNIST 라벨 로드, bit-exact 비교, `Conv2D_Spec` / `FC_Spec` 등 명세 saturation 규칙 (LSB-10bit shift + clip[-128,127]) 을 갖는 base 레이어 클래스 정의
-  - `0_reference.py` — INT8 Direct 컨볼루션 reference. 명세 그대로 구현하여 `data/npy/output.npy` 와 bit-exact 일치 검증
-  - `1_complex_winograd_f(4,3).py` — Complex F(4,3) Winograd 변환 reference 구현
-- `weights/` — Winograd weight transform 및 ROM 생성 스크립트
-- `header_gen/` — SIMD-packed weight 를 Vitis 펌웨어용 C header 로 변환 (산출물: `data/headers_simd/`)
-- `hex_gen/` — Verilog `$readmemh` 가 읽을 수 있는 hex dump 생성 (산출물: `data/hex_layer_by_layer/`)
+- `golden_sim/` — PyTorch bit-exact reference
+  - `reference_core.py` — 공통 유틸 (`.npy`·MNIST 라벨 로드, bit-exact 비교, 명세 saturation 규칙 = `>>10` shift + clip[-128,127] 을 갖는 base 레이어)
+  - `0_reference.py` — INT8 Direct 컨볼루션 reference (`data/_base_npy/output.npy` 와 bit-exact 일치)
+  - `1_complex_winograd_f(4,3).py` — complex F(4,3) Winograd 변환 reference (10,000장 bit-exact)
+- `single_img/` `multi_img/` — 레이어별 / 다중 이미지 골든 hex 생성
+- `weights/` — DSP SIMD weight packing (`weight_simd_pack.py`)
 
 ### `data/`
 
-학습이 완료되어 양자화까지 끝난 INT8 파라미터 및 검증용 입출력. `scripts/` 산출물의 저장소 역할도 겸한다.
+`scripts/` 산출물 및 원본 INT8 파라미터. TB / vitis 가 소비한다.
 
-- `npy/` — 원본 `.npy` 파라미터 및 reference 입출력
-  - `input.npy` — 예제 입력 이미지
-  - `layer1_0_weight.npy` — Conv1 weight (8, 1, 3, 3)
-  - `layer2_0_weight.npy` — Conv2 weight (16, 8, 3, 3)
-  - `fc1_weight.npy` — FC weight (10, 2304)
-  - `output.npy` — reference 모델의 expected output (bit-exact 검증 목표)
-- `headers_simd/` — `scripts/header_gen` 산출물 (Vitis 펌웨어가 include 하는 weight header)
-- `hex_layer_by_layer/` — `scripts/hex_gen` 산출물 (Verilog testbench / BRAM init 용 hex)
-- `params.zip` — 원본 파라미터 묶음
+- `_base_npy/` — 원본 PyTorch `.npy` (Conv1 `(8,1,3,3)` / Conv2 `(16,8,3,3)` / FC `(10,2304)` weight, input, expected output)
+- `single_img/` `multi_img/` — 레이어별 / 다중 이미지 골든 hex
+- `weights_simd/` — SIMD packed weight (`.hex` = TB 용, `.h` = vitis 용)
+- `winograd/` — Winograd 골든 데이터
 
 ### `docs/`
 
@@ -237,7 +249,7 @@ Phase 1 이후 모든 CNN 가속기 RTL 이 모이는 메인 디렉토리. 위 B
 
 전형적인 작업 사이클은 다음과 같다.
 
-1. **알고리즘 검증 (scripts/golden_sim)** — Python 으로 명세 구현, `data/npy/output.npy` 와 bit-exact 일치 확인
+1. **알고리즘 검증 (scripts/golden_sim)** — Python 으로 명세 구현, `data/_base_npy/output.npy` 와 bit-exact 일치 확인
 2. **RTL 설계 (RTL)** — 동일 동작을 Verilog 로 옮기고, testbench 로 동일 입력에 대한 동일 출력 검증
 3. **합성 & 보드 검증 (Vivado / Vitis)** — 위 Block Design 으로 bitstream 빌드 → Arty A7-100T 에 적재 → PS 측 baremetal app 으로 MNIST 1만 장 분류 수행
 4. **측정 & 최적화** — 1만 장 처리 총 시간 측정 후 다음 마일스톤으로

@@ -45,7 +45,8 @@ Output Logit (10) → argmax
 ### 평가 지표 (우선순위 순)
 
 1. **End-to-end Latency (최우선)** — **MNIST 1만 장 이미지 분류에 걸리는 총 시간**. 이 값을 최소화하는 것이 본 프로젝트의 1순위 목표
-2. **Throughput** — 연속 inference 파이프라이닝 효율
+2. **Power (소비 전력)** — on-chip power
+3. **Resource (자원 사용량)** — DSP / LUT / FF / BRAM
 
 > 단일 이미지 latency 뿐 아니라 PS-PL 데이터 전송, BRAM 입출력, 1만 장 batch 전체에 걸친 누적 시간을 모두 고려한 end-to-end 시간이 평가 기준이다.
 
